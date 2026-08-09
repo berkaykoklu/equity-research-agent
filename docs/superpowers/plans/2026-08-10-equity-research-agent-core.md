@@ -806,7 +806,7 @@ git commit -m "feat: resolve tickers to CIKs and locate latest 10-K and 10-Q"
 Item-boundary detection is heuristic — filers vary wildly in markup. **The parser reports what it found.** An unlocatable Item 1A marks that section unavailable rather than producing a confident empty one.
 
 **Files:**
-- Create: `src/era/edgar/sections.py`, `tests/edgar/test_sections.py`, `tests/fixtures/filing_simple.html`, `tests/fixtures/filing_no_item_1a.html`
+- Create: `src/era/edgar/sections.py`, `tests/edgar/test_sections.py`, `tests/fixtures/filing_simple.html`, `tests/fixtures/filing_no_item_1a.html`, `tests/fixtures/filing_with_toc.html`
 
 **Interfaces:**
 - Consumes: nothing (operates on filing HTML text)
@@ -823,6 +823,28 @@ Item-boundary detection is heuristic — filers vary wildly in markup. **The par
 <p>Our business is subject to supply chain concentration in a single region.</p>
 <p>Item 7. Management's Discussion and Analysis</p>
 <p>Net sales increased in fiscal 2024 driven by services growth.</p>
+<p>Item 8. Financial Statements</p>
+</body></html>
+```
+
+`tests/fixtures/filing_with_toc.html` — a filing that lists its items in a table
+of contents before the real sections, the way every actual 10-K does:
+```html
+<html><body>
+<p>Table of Contents</p>
+<p>Item 1. Business ..... 3</p>
+<p>Item 1A. Risk Factors ..... 15</p>
+<p>Item 7. Management's Discussion and Analysis ..... 42</p>
+<p>Item 8. Financial Statements ..... 60</p>
+<p>Item 1. Business</p>
+<p>We design and sell smartphones, computers and wearables worldwide, and we
+operate retail stores across many countries.</p>
+<p>Item 1A. Risk Factors</p>
+<p>Our business is subject to supply chain concentration in a single region,
+which could materially affect our results of operations.</p>
+<p>Item 7. Management's Discussion and Analysis</p>
+<p>Net sales increased in fiscal 2024 driven by services growth across every
+geographic segment.</p>
 <p>Item 8. Financial Statements</p>
 </body></html>
 ```
@@ -869,6 +891,18 @@ def test_reports_a_missing_item_rather_than_inventing_one() -> None:
 
     assert "1A" not in parsed.items
     assert parsed.missing == ("1A",)
+
+
+def test_prefers_the_real_section_over_the_table_of_contents_entry() -> None:
+    # Every real 10-K lists its items twice — once in the TOC, once as content.
+    # Taking the first match would capture "Risk Factors ..... 15" instead of
+    # the risk factors themselves, and no other test in this file would notice.
+    parsed = parse_items((FIXTURES / "filing_with_toc.html").read_text())
+
+    assert "supply chain concentration" in parsed.items["1A"]
+    assert "smartphones" in parsed.items["1"]
+    assert "services growth" in parsed.items["7"]
+    assert parsed.missing == ()
 ```
 
 - [ ] **Step 3: Run it to verify it fails**
@@ -904,17 +938,25 @@ def _to_text(html: str) -> str:
 
 
 def parse_items(html: str) -> ParsedFiling:
+    """Split a filing into the items we care about.
+
+    Every 10-K lists its items twice: once in the table of contents and once as
+    the actual sections. TOC entries match the same heading pattern, so the
+    first match for an item is usually a page-number line rather than content.
+    Keeping the longest body found for each item picks the real section, because
+    a TOC line is a few words and a real item is paragraphs.
+    """
     text = _to_text(html)
     matches = list(_HEADING.finditer(text))
 
     bodies: dict[str, str] = {}
     for index, match in enumerate(matches):
         item = match.group("item").upper()
-        if item not in WANTED_ITEMS or item in bodies:
+        if item not in WANTED_ITEMS:
             continue
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         body = text[match.end() : end].strip()
-        if body:
+        if len(body) > len(bodies.get(item, "")):
             bodies[item] = body
 
     missing = tuple(item for item in WANTED_ITEMS if item not in bodies)
