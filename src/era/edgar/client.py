@@ -152,7 +152,15 @@ class EdgarClient:
             self._last_request_at = time.monotonic()
 
     def _get_with_retry(self, url: str) -> httpx.Response:
+        # This is the only place that reaches the network, and every
+        # attempt — not just the first — is a real outbound request. Each
+        # one clears the throttle on its own so `_last_request_at` always
+        # reflects the most recent actual call, never the start of a retry
+        # sequence a Retry-After sleep is still working through. Stamping
+        # it only once up front would let a retry's backoff sleep masquerade
+        # as throttle idle time and let the *next* request skip its wait.
         for attempt in range(MAX_ATTEMPTS):
+            self._throttle()
             response = self._client.get(url)
             if response.status_code not in RETRYABLE_STATUS_CODES:
                 response.raise_for_status()
@@ -167,7 +175,6 @@ class EdgarClient:
         path = self._cache_path(url)
         if path is not None and self._cache_is_fresh(path, resolved_max_age):
             return path.read_text(encoding="utf-8")
-        self._throttle()
         response = self._get_with_retry(url)
         if path is not None:
             self._write_cache(path, response.text)

@@ -5,7 +5,12 @@ import httpx
 import pytest
 import respx
 
-from era.edgar.client import EdgarClient, MissingUserAgentError, UnexpectedJsonShapeError
+from era.edgar.client import (
+    MIN_INTERVAL_SECONDS,
+    EdgarClient,
+    MissingUserAgentError,
+    UnexpectedJsonShapeError,
+)
 
 CONTACT_USER_AGENT = "Berkay Koklu kokluberkay@gmail.com"
 
@@ -155,6 +160,51 @@ def test_exhausts_retries_and_raises_on_persistent_429() -> None:
         client.get_json("https://data.sec.gov/thing.json")
 
     assert route.call_count == 3
+
+
+@respx.mock
+def test_retry_attempts_still_respect_the_request_throttle() -> None:
+    # Every attempt in a retry sequence is a real outbound request, so each
+    # one must clear the throttle just like any other request. With 3
+    # attempts there are 2 gaps between them, so the whole sequence cannot
+    # finish faster than 2 * MIN_INTERVAL_SECONDS.
+    respx.get("https://data.sec.gov/thing.json").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "0"}, json={})
+    )
+    client = EdgarClient(user_agent=CONTACT_USER_AGENT, cache_dir=None)
+
+    start = time.monotonic()
+    with pytest.raises(httpx.HTTPStatusError):
+        client.get_json("https://data.sec.gov/thing.json")
+    elapsed = time.monotonic() - start
+
+    assert elapsed >= 2 * MIN_INTERVAL_SECONDS
+
+
+@respx.mock
+def test_a_retry_sequence_does_not_leak_throttle_budget_to_the_next_request() -> None:
+    # A retry's backoff sleep must not be mistaken for throttle idle time.
+    # If the throttle clock is only stamped once at the start of the retry
+    # sequence, the next unrelated request sees a large fake "elapsed" and
+    # skips its own wait — firing well under MIN_INTERVAL_SECONDS after the
+    # retried request's real last network call.
+    respx.get("https://data.sec.gov/thing.json").mock(
+        side_effect=[
+            httpx.Response(429, headers={"Retry-After": "0.3"}, json={}),
+            httpx.Response(200, json={"ok": True}),
+        ]
+    )
+    respx.get("https://data.sec.gov/other.json").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    client = EdgarClient(user_agent=CONTACT_USER_AGENT, cache_dir=None)
+
+    client.get_json("https://data.sec.gov/thing.json")
+    before_next = time.monotonic()
+    client.get_json("https://data.sec.gov/other.json")
+    gap = time.monotonic() - before_next
+
+    assert gap >= MIN_INTERVAL_SECONDS
 
 
 def test_context_manager_closes_the_underlying_http_client() -> None:
