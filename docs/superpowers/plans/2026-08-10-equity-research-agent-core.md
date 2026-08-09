@@ -26,6 +26,15 @@
 - Model: `gpt-5.6-terra` for all drafting. Judge: `gpt-5.6-luna`. Embeddings: `voyage-finance-2` (1024 dims).
 - Tests never touch the network or a live database. External surfaces sit behind Protocols with fakes in tests.
 - `.env` is gitignored; `.env.example` documents every variable.
+- **Readability is a hard requirement, not a preference.** Berkay must be able to
+  read any file in this repo and understand it without tracing calls. That means:
+  names that say what the thing does in domain terms (`resolve_cik`, not
+  `get_data`); functions short enough to hold in your head; no clever one-liners
+  where three plain lines are clearer; no comments restating the code, but a short
+  comment wherever a non-obvious constraint drove the design (SEC rate limits,
+  why numbers bypass embeddings, why a retry is bounded). Prefer an explicit
+  `if` over a nested comprehension. A reviewer flagging "this is hard to follow"
+  is a valid Important finding, not a style opinion.
 
 ---
 
@@ -3008,7 +3017,27 @@ jobs:
 
 - [ ] **Step 3: Write the README**
 
-Cover, in this order: the one-paragraph pitch; a real generated note excerpt; quickstart (`uv sync`, `era ingest AAPL`, `era research AAPL`); a mermaid architecture diagram matching `graph/build.py`; the measured cost and latency per run; the design decisions from the spec's "worth defending" list; and the stated limits — US issuers only, ~20–30 indexed tickers, heuristic item parsing.
+Cover, in this order: the one-paragraph pitch; a real generated note excerpt; quickstart (`uv sync`, `era ingest AAPL`, `era research AAPL`); the architecture section described below; the measured cost and latency per run; the design decisions from the spec's "worth defending" list; and the stated limits — US issuers only, ~20–30 indexed tickers, heuristic item parsing.
+
+**The architecture section is the most important part of this README and has a
+specific shape.** It is written for a reader who has never seen the code and wants
+to understand how the system *behaves*, not how it is factored.
+
+- A **mermaid diagram at the level of capabilities, not functions.** Nodes are
+  things the system does in plain language — "find the company's filings",
+  "pull exact figures from XBRL", "research each section from its own sources",
+  "check every claim against the filing", "assemble the note" — not module or
+  function names. One diagram for the whole flow, readable at a glance.
+- Under it, a **worked example following one real ticker end to end**: what goes
+  in, what each stage produces, what the reader would actually see. Show a real
+  claim, the chunk it cites, and the accession that chunk came from, so the
+  citation chain is concrete rather than described.
+- Then a short **"what happens when something is missing"** walkthrough — a filing
+  whose Item 1A cannot be located, a figure that disagrees with XBRL — showing how
+  coverage reporting and the verifier respond. The failure paths are what make the
+  design defensible; describing only the happy path hides the actual engineering.
+
+Function-by-function documentation belongs in docstrings, not here.
 
 - [ ] **Step 4: Verify everything**
 
