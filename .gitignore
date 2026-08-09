@@ -2,8 +2,13 @@
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .cache/
 .superpowers/
+.DS_Store
+dist/
+*.egg-info/

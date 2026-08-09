@@ -190,7 +190,7 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
-      - run: uv sync --all-groups
+      - run: uv sync --all-groups --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy src
@@ -2995,7 +2995,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv sync --all-groups
+      - run: uv sync --all-groups --locked
       - run: uv run python evals/tier2/run_experiment.py
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

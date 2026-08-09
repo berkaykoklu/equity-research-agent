@@ -39,7 +39,7 @@ packages = ["src/era"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-extend-exclude = ["docs"]
+extend-exclude = ["docs/**/*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
