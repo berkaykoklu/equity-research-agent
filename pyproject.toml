@@ -51,3 +51,4 @@ files = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "evals/tier1"]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"

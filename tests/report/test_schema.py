@@ -1,7 +1,16 @@
 import pytest
 from pydantic import ValidationError
 
-from era.report.schema import ChunkRef, Claim, FactRef, Section, SectionName
+from era.report.schema import (
+    ChunkRef,
+    Claim,
+    Coverage,
+    FactRef,
+    ResearchNote,
+    Section,
+    SectionName,
+    revalidated,
+)
 
 
 def test_claim_requires_at_least_one_source() -> None:
@@ -41,3 +50,51 @@ def test_fact_ref_carries_the_exact_value() -> None:
         accession="0000320193-24-000123",
     )
     assert fact.value == 391_035_000_000.0
+
+
+def test_revalidated_re_raises_on_an_invalid_update() -> None:
+    section = Section(
+        name=SectionName.RISK_FACTORS,
+        claims=[
+            Claim(
+                text="Competition is intense.",
+                chunks=[ChunkRef(accession="0000320193-24-000123", chunk_id=1)],
+            )
+        ],
+    )
+    with pytest.raises(ValidationError):
+        revalidated(section, claims=())
+
+
+def test_revalidated_round_trips_a_valid_update() -> None:
+    section = Section(
+        name=SectionName.RISK_FACTORS,
+        claims=[
+            Claim(
+                text="Competition is intense.",
+                chunks=[ChunkRef(accession="0000320193-24-000123", chunk_id=1)],
+            )
+        ],
+    )
+    updated = revalidated(section, unavailable_reason=None)
+    assert updated.claims == section.claims
+    assert updated is not section
+
+
+def test_research_note_rejects_coverage_that_contradicts_its_sections() -> None:
+    section = Section(
+        name=SectionName.RISK_FACTORS,
+        claims=[
+            Claim(
+                text="Competition is intense.",
+                chunks=[ChunkRef(accession="0000320193-24-000123", chunk_id=1)],
+            )
+        ],
+    )
+    with pytest.raises(ValidationError):
+        ResearchNote(
+            ticker="AAPL",
+            cik="0000320193",
+            sections=(section,),
+            coverage=Coverage(sections_available=0, sections_total=1),
+        )
