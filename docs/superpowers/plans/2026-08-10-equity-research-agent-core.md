@@ -2802,8 +2802,11 @@ def research(ticker: str) -> None:
         facts,
     )
     result, record = tracked_run(graph, {"ticker": ticker.upper(), "cik": cik})
-    note = result["note"].model_copy(
-        update={"latency_seconds": record.latency_seconds, "cost_usd": record.cost_usd}
+    # `revalidated` re-runs the schema validators; `model_copy` would skip them.
+    note = revalidated(
+        result["note"],
+        latency_seconds=record.latency_seconds,
+        cost_usd=record.cost_usd,
     )
     typer.echo(render_markdown(note))
 ```
