@@ -1867,7 +1867,7 @@ def test_rejects_a_number_absent_from_the_cited_chunk() -> None:
         name=SectionName.RISK_FACTORS,
         claims=(
             Claim(
-                text="The company lost 42 factories.",
+                text="The company closed 4,200 retail stores.",
                 chunks=(ChunkRef(accession="acc", chunk_id=0),),
             ),
         ),
@@ -1876,6 +1876,44 @@ def test_rejects_a_number_absent_from_the_cited_chunk() -> None:
     violations = verify_section(section, store, FACTS)
 
     assert [v.kind for v in violations] == ["unsupported_figure"]
+
+
+def test_ignores_years_and_small_counts_in_claim_text() -> None:
+    # "2024" and "3" are a year and an ordinal, not magnitudes anyone could
+    # hallucinate. Flagging them would fire the retry loop on every section.
+    store = _store_with("Supply chain concentration is a material risk.")
+    section = Section(
+        name=SectionName.RISK_FACTORS,
+        claims=(
+            Claim(
+                text="In fiscal 2024 the company identified 3 principal risks.",
+                chunks=(ChunkRef(accession="acc", chunk_id=0),),
+            ),
+        ),
+    )
+
+    assert verify_section(section, store, FACTS) == []
+
+
+def test_accepts_a_figure_quoted_at_the_filing_s_presented_scale() -> None:
+    # Filings present revenue in millions; XBRL reports it in dollars. A claim
+    # quoting 391035 must not be rejected against an XBRL value of 391035000000.
+    section = Section(
+        name=SectionName.FINANCIAL_HEALTH,
+        claims=(
+            Claim(
+                text="Revenue was 391,035 million USD.",
+                facts=(
+                    FactRef(
+                        tag="Revenues", fiscal_period="FY2024",
+                        value=391_035_000_000.0, accession="acc",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert verify_section(section, InMemoryChunkStore(), FACTS) == []
 
 
 def test_rejects_a_fact_value_that_disagrees_with_xbrl() -> None:
@@ -1927,6 +1965,12 @@ RECOMMENDATION_TERMS = (
     "outperform", "underperform", "strong buy", "we recommend",
 )
 RELATIVE_TOLERANCE = 0.005
+YEAR_RANGE = range(1900, 2100)
+# Below this, a number in prose is a year, an ordinal, a share count or a section
+# reference — not a financial magnitude anyone could meaningfully hallucinate.
+# Checking those produces constant false violations, which would drive the retry
+# loop on every section and burn the run's budget rediscovering nothing.
+MATERIAL_FIGURE_MIN = 1000
 
 
 @dataclass(frozen=True)
@@ -1935,8 +1979,41 @@ class Violation:
     detail: str
 
 
+def _normalise(figure: str) -> str:
+    """Compare figures by value, not spelling: 391,035.0 and 391035 are one number."""
+    plain = figure.replace(",", "")
+    if plain.endswith(".0"):
+        plain = plain[:-2]
+    return plain.rstrip(".")
+
+
 def _figures(text: str) -> set[str]:
-    return {m.group().replace(",", "") for m in FIGURE.finditer(text)}
+    return {_normalise(match.group()) for match in FIGURE.finditer(text)}
+
+
+def _is_material(figure: str) -> bool:
+    try:
+        value = float(figure)
+    except ValueError:
+        return False
+    if value.is_integer() and int(value) in YEAR_RANGE:
+        return False
+    return abs(value) >= MATERIAL_FIGURE_MIN
+
+
+def _fact_spellings(value: float) -> set[str]:
+    """Filings state 391,035 (in millions); XBRL states 391035000000.
+
+    Both are the same figure, so a claim quoting the filing's presented scale
+    must not be flagged as unsupported. Accept the value at every scale a filing
+    conventionally uses.
+    """
+    spellings: set[str] = set()
+    for scale in (1, 1_000, 1_000_000, 1_000_000_000):
+        scaled = value / scale
+        if scaled >= 1 and scaled.is_integer():
+            spellings.add(str(int(scaled)))
+    return spellings
 
 
 def no_recommendation_language(text: str) -> list[Violation]:
@@ -1960,6 +2037,7 @@ def verify_section(
         violations.extend(no_recommendation_language(claim.text))
 
         supporting_text: list[str] = []
+        supported_figures: set[str] = set()
         for ref in claim.chunks:
             stored = store.get(ref.accession, ref.chunk_id)
             if stored is None:
@@ -1988,13 +2066,16 @@ def verify_section(
                     )
                 )
             else:
-                supporting_text.append(f"{match.value}")
+                supported_figures |= _fact_spellings(match.value)
 
-        claimed = _figures(claim.text)
+        # Only material figures are checked. A claim saying "in fiscal 2024" must
+        # not be rejected because "2024" happens not to appear in the cited chunk.
+        claimed = {f for f in _figures(claim.text) if _is_material(f)}
         if claimed:
-            supported = set().union(*(_figures(t) for t in supporting_text)) \
-                if supporting_text else set()
-            for figure in claimed - supported:
+            supported = set(supported_figures)
+            for text in supporting_text:
+                supported |= _figures(text)
+            for figure in sorted(claimed - supported):
                 violations.append(
                     Violation(kind="unsupported_figure", detail=figure)
                 )
