@@ -3112,3 +3112,170 @@ git push -u origin main
 **Deferred to Plan 2, deliberately:** FastAPI, Next.js, Vercel deployment, Neon provisioning, stored reports, live smoke workflow, `research_note_for` wiring into an API. Two spec items land in Plan 2 rather than here: the live-EDGAR smoke job on merges to main, and open on-demand generation.
 
 **Known follow-up inside this plan:** `tracked_run` returns `cost_usd=0.0` until Task 2's spike confirms whether Opik captures token usage through the LangGraph callback path. If it does not, the implementer wires `usage_metadata` from each model response into `cost_from_usage` directly — the function and its tests already exist.
+
+---
+
+### Task 18: Validate the parser against real 10-K filings
+
+**Sequencing:** runs immediately after Task 6 and **gates Tasks 8 and 10**. Chunking
+and ingest both build directly on `parse_items` output; if the heuristic is wrong on
+real filings, everything downstream inherits it silently.
+
+**Why this exists.** Every defect found in Task 6 so far — table-of-contents capture,
+cross-reference swallowing, entity-escaped headings, the longest-body rule inverting
+on short items — was found against *synthetic* HTML modelled on filing conventions.
+No real filing has ever been through this parser. Synthetic fixtures encode the
+author's assumptions, which is exactly what is under test here.
+
+**The check.** A correctly extracted item body begins with its own title. A body that
+starts with something else is the signature of a TOC capture or a cross-reference
+swallow. That single assertion catches three of Task 6's four Criticals.
+
+**Files:**
+- Create: `tests/edgar/test_sections_live.py`, `docs/parser-validation.md`
+
+**Interfaces:**
+- Consumes: `EdgarClient` (Task 4), `resolve_cik` / `latest_filings` (Task 5), `parse_items` (Task 6)
+- Produces: a committed validation report; no new importable API
+
+- [ ] **Step 1: Write the live validation test**
+
+Network-dependent, so it is skip-guarded exactly like the pgvector integration test —
+CI stays offline and deterministic, and this runs deliberately.
+
+`tests/edgar/test_sections_live.py`:
+```python
+"""Validate the item parser against real filings.
+
+Skipped unless ERA_LIVE_EDGAR=1. Everything else in the suite runs offline;
+this one deliberately hits EDGAR, because synthetic fixtures only ever encode
+the assumptions of whoever wrote them.
+"""
+
+import os
+from pathlib import Path
+
+import pytest
+
+from era.edgar.client import EdgarClient
+from era.edgar.filings import latest_filings, resolve_cik
+from era.edgar.sections import parse_items
+
+USER_AGENT = os.environ.get("EDGAR_USER_AGENT", "")
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("ERA_LIVE_EDGAR") != "1" or "@" not in USER_AGENT,
+    reason="set ERA_LIVE_EDGAR=1 and a contactable EDGAR_USER_AGENT to run this",
+)
+
+CACHE_DIR = Path(".cache/edgar-live")
+
+# A correctly extracted body opens with its own title. Anything else means the
+# parser captured a table-of-contents line or ran past a cross-reference.
+EXPECTED_OPENING = {
+    "1": ("business",),
+    "1A": ("risk factor",),
+    "7": ("management", "discussion"),
+}
+
+# Large caps whose filings genuinely contain all three items, plus deliberate
+# awkwardness: BRK-B files unconventionally, and the banks and energy names use
+# very different document generators from the tech names.
+TICKERS = [
+    "AAPL", "MSFT", "BRK-B", "JPM", "XOM",
+    "KO", "JNJ", "PG", "WMT", "CVX",
+    "MRK", "T", "VZ", "PFE", "INTC",
+    "CSCO", "BA", "CAT", "GE", "DIS",
+]
+
+OPENING_WINDOW = 120
+
+
+def _annual_report_html(client: EdgarClient, ticker: str) -> str:
+    cik = resolve_cik(client, ticker)
+    filings = latest_filings(client, cik)
+    annual = next(f for f in filings if f.form == "10-K")
+    return client.get_text(annual.primary_document_url)
+
+
+def _opening_matches(item: str, body: str) -> bool:
+    opening = body[:OPENING_WINDOW].lower()
+    return any(word in opening for word in EXPECTED_OPENING[item])
+
+
+@pytest.fixture(scope="module")
+def results() -> dict[str, dict[str, str]]:
+    """Parse every ticker once; the client's disk cache makes reruns cheap."""
+    client = EdgarClient(user_agent=USER_AGENT, cache_dir=CACHE_DIR)
+    collected: dict[str, dict[str, str]] = {}
+    for ticker in TICKERS:
+        parsed = parse_items(_annual_report_html(client, ticker))
+        collected[ticker] = parsed.items
+    return collected
+
+
+def test_every_extracted_item_opens_with_its_own_title(results) -> None:
+    failures: list[str] = []
+    for ticker, items in results.items():
+        for item, body in items.items():
+            if not _opening_matches(item, body):
+                failures.append(
+                    f"{ticker} item {item}: opens with {body[:80]!r}"
+                )
+
+    assert not failures, "\n".join(failures)
+
+
+def test_every_ticker_yields_all_three_items(results) -> None:
+    incomplete = {
+        ticker: sorted(set(EXPECTED_OPENING) - set(items))
+        for ticker, items in results.items()
+        if set(EXPECTED_OPENING) - set(items)
+    }
+
+    assert not incomplete, f"items not found: {incomplete}"
+
+
+def test_no_item_body_is_implausibly_short(results) -> None:
+    # Item 1A on a company this size is always substantial. A body of a few
+    # dozen characters means a table-of-contents line won the length contest.
+    too_short = [
+        f"{ticker} item {item}: {len(body)} chars"
+        for ticker, items in results.items()
+        for item, body in items.items()
+        if len(body) < 500
+    ]
+
+    assert not too_short, "\n".join(too_short)
+```
+
+- [ ] **Step 2: Run it and record what actually happens**
+
+```bash
+ERA_LIVE_EDGAR=1 uv run --directory "<repo>" pytest tests/edgar/test_sections_live.py -v
+```
+
+Expect this to take several minutes on the first run — twenty 10-K documents, several
+megabytes each, fetched under a 10 req/s throttle. Subsequent runs read the disk cache.
+
+**Do not adjust the assertions to make them pass.** Failures here are the finding.
+Record exactly which tickers fail, on which items, and what the body opened with.
+
+- [ ] **Step 3: Write `docs/parser-validation.md`**
+
+A table of ticker × item with the character count and the first 60 characters of each
+body, plus a pass/fail column and a short paragraph on what the failures have in
+common. This is committed evidence that the heuristic was measured rather than
+assumed, and it is the thing to re-run whenever the parser changes.
+
+- [ ] **Step 4: Report findings rather than patching blindly**
+
+If tickers fail, report them with the diagnosis. Parser changes are a separate,
+reviewed round — this task measures, it does not fix.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C "<repo>" add tests/edgar/test_sections_live.py docs/parser-validation.md
+git -C "<repo>" commit -m "test: validate item parser against twenty real 10-K filings"
+```
