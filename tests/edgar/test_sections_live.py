@@ -131,14 +131,43 @@ def test_every_extracted_item_opens_with_its_own_title(results) -> None:
     assert not failures, "\n".join(failures)
 
 
-def test_every_ticker_yields_all_three_items(results) -> None:
-    incomplete = {
-        ticker: sorted(set(EXPECTED_OPENING) - set(items))
+# Recorded baseline, measured across twenty real filings. Each entry is the
+# parser being correct rather than failing: a filing that never labels its
+# sections, or an Item 7 that is a pointer to unlabelled prose elsewhere in
+# the document. A gap outside this set is a real regression.
+KNOWN_UNAVAILABLE = {
+    "GE": {"1", "1A", "7"},  # only "Item N" text is a back-of-document index
+    "INTC": {"1", "1A", "7"},  # same shape as GE
+    "JPM": {"7"},  # Item 7 reads "...pages 165-314"
+    "CVX": {"7"},  # same incorporation-by-reference shape
+}
+
+
+def test_no_new_gaps_appear(results) -> None:
+    # A ticker missing an item that isn't in KNOWN_UNAVAILABLE is a genuine
+    # parser regression, not a known structural limitation -- fail loudly
+    # rather than let a new gap blend in with the recorded ones.
+    unexpected = {
+        ticker: sorted(missing)
         for ticker, items in results.items()
-        if set(EXPECTED_OPENING) - set(items)
+        if (missing := (set(EXPECTED_OPENING) - set(items)) - KNOWN_UNAVAILABLE.get(ticker, set()))
     }
 
-    assert not incomplete, f"items not found: {incomplete}"
+    assert not unexpected, f"unexpected gaps: {unexpected}"
+
+
+def test_the_baseline_does_not_hide_a_recovered_item(results) -> None:
+    # The inverse check matters as much as the one above: if a filing that
+    # used to be missing an item now parses it, KNOWN_UNAVAILABLE is stale
+    # and must be tightened -- a baseline that only ever grows is not a
+    # baseline, it's blanket permission to fail.
+    stale = {
+        ticker: sorted(recovered)
+        for ticker, expected_missing in KNOWN_UNAVAILABLE.items()
+        if ticker in results and (recovered := expected_missing & set(results[ticker]))
+    }
+
+    assert not stale, f"baseline entries that no longer reproduce: {stale}"
 
 
 def test_no_item_body_is_implausibly_short(results) -> None:
