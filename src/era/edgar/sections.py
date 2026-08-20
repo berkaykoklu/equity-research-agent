@@ -25,10 +25,26 @@ _INLINE_WHITESPACE = re.compile(r"[^\S\n]+")
 # always start a block; heading-shaped text that appears mid-sentence (a
 # cross-reference like "...as discussed in Item 7 above") never does. This
 # distinction only matters because _HEADING is anchored to line starts:
-# giving block tags a newline and everything else a space is what lets that
-# anchor tell a genuine heading apart from prose that merely mentions one.
+# giving block tags a newline and every other tag nothing at all is what
+# lets that anchor tell a genuine heading apart from prose that merely
+# mentions one.
+#
+# Inline tags must be zero-width, not a space: some filers (Berkshire's
+# filing is a confirmed real example) split a single word across sibling
+# inline tags with no text-node space between them --
+# `<span>Item 1. Busines</span><span>s Description</span>` -- because the
+# split falls wherever the document's rendering pipeline happened to wrap,
+# not at a word boundary. Substituting a space at every inline-tag boundary
+# would land a space inside that word ("Busines s Description"); deleting
+# the tag and inserting nothing lets the two text fragments rejoin exactly
+# as they were written ("Business Description"). A genuine missing space
+# between two inline elements is comparatively rare and, when it happens,
+# produces two run-together words rather than a corrupted one -- a smaller
+# and more honest failure than silently injecting whitespace that was never
+# there.
+#
 # Anything not in this set -- including tags this parser doesn't recognize
-# at all -- defaults to a space rather than a newline, which is the more
+# at all -- defaults to zero-width rather than a newline, which is the more
 # conservative choice: it can only ever cost a false-negative heading match,
 # never manufacture a false-positive one.
 _BLOCK_TAGS = frozenset(
@@ -99,7 +115,7 @@ def _strip_scripts_and_styles(html: str) -> str:
 def _tag_replacement(match: re.Match[str]) -> str:
     name_match = _TAG_NAME.match(match.group(0))
     name = name_match.group(1).lower() if name_match else ""
-    return "\n" if name in _BLOCK_TAGS else " "
+    return "\n" if name in _BLOCK_TAGS else ""
 
 
 def _to_text(html: str) -> str:

@@ -1,8 +1,17 @@
 from pathlib import Path
 
-from era.edgar.sections import parse_items
+from era.edgar.sections import _to_text, parse_items
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
+
+
+def test_a_word_split_across_inline_tags_stays_whole() -> None:
+    # Berkshire's real filing does exactly this: an inline <span> boundary
+    # falls in the middle of a word with no text-node space to rejoin it.
+    html = "<p><span>Item 1. Busines</span><span>s Description</span></p><p>We sell things.</p>"
+
+    assert "Business Description" in _to_text(html)
+    assert "Busines s" not in _to_text(html)
 
 
 def test_extracts_each_item_body() -> None:
