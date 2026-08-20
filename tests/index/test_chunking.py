@@ -3,7 +3,7 @@ import pytest
 from era.index.chunking import chunk_items
 
 
-def test_chunk_ids_are_unique_and_stable() -> None:
+def test_chunk_ids_are_unique_and_monotonic() -> None:
     items = {"1": "alpha " * 500, "1A": "beta " * 500}
 
     chunks = chunk_items("0000320193-24-000123", items, max_chars=600, overlap=50)
@@ -94,6 +94,20 @@ def test_overlap_larger_than_max_chars_is_rejected() -> None:
         chunk_items("acc", {"1": "text"}, max_chars=600, overlap=700)
 
 
+def test_overlap_close_to_max_chars_is_rejected() -> None:
+    # Legal under the old "overlap < max_chars" rule alone, but a stride of
+    # 1 turns a single item into one chunk per character -- an unbounded
+    # embedding cost for Task 9 reachable from this one config value.
+    with pytest.raises(ValueError, match="overlap"):
+        chunk_items("acc", {"1": "text"}, max_chars=600, overlap=599)
+
+
+def test_overlap_at_half_max_chars_is_allowed() -> None:
+    chunks = chunk_items("acc", {"1": "x" * 10}, max_chars=600, overlap=300)
+
+    assert len(chunks) == 1
+
+
 def test_negative_overlap_is_rejected() -> None:
     with pytest.raises(ValueError, match="overlap"):
         chunk_items("acc", {"1": "text"}, max_chars=600, overlap=-1)
@@ -118,10 +132,12 @@ def test_chunk_ids_restart_from_zero_per_call() -> None:
 
 
 def test_no_content_is_lost_between_chunks() -> None:
-    # Each chunk must be the exact slice its position implies (start = i *
-    # stride), and the final chunk must reach the end of the text --
-    # otherwise content vanished at a seam instead of merely being
-    # duplicated across it.
+    # This text has no whitespace, so no window can ever be blank and none
+    # is skipped -- every chunk's start is exactly i * stride. Assert that
+    # against the recorded `start` field (an independent, formula-derived
+    # expectation), not merely that `start` is self-consistent with its own
+    # chunk's text -- otherwise a bug in how `start` advances between
+    # chunks would go uncaught.
     text = "0123456789" * 130  # 1300 chars, not a multiple of the stride
     max_chars, overlap = 400, 100
     stride = max_chars - overlap
@@ -130,7 +146,61 @@ def test_no_content_is_lost_between_chunks() -> None:
 
     covered_end = 0
     for i, chunk in enumerate(chunks):
-        start = i * stride
-        assert text[start : start + len(chunk.text)] == chunk.text
-        covered_end = max(covered_end, start + len(chunk.text))
+        assert chunk.start == i * stride
+        assert text[chunk.start : chunk.start + len(chunk.text)] == chunk.text
+        covered_end = max(covered_end, chunk.start + len(chunk.text))
     assert covered_end == len(text)
+
+
+def test_a_whitespace_run_aligned_to_the_stride_is_dropped_not_split() -> None:
+    # A blank window -- an entire max_chars-wide slice that is pure
+    # whitespace -- is skipped rather than stored (see _windows). A long
+    # enough whitespace run can therefore leave a real gap between the
+    # chunks on either side of it: characters 100-499 below appear in no
+    # chunk at all. This is accepted, not accidental -- pure whitespace has
+    # no citable content, and era.edgar.sections already collapses
+    # whitespace runs before chunking ever sees the text -- but it means
+    # `chunk.start` cannot always be derived as index * stride, only read
+    # from the chunk itself.
+    text = "A" * 100 + " " * 400 + "B" * 100
+
+    chunks = chunk_items("acc", {"1": text}, max_chars=100, overlap=0)
+
+    assert [(c.start, c.text) for c in chunks] == [(0, "A" * 100), (500, "B" * 100)]
+
+
+def test_stored_text_is_byte_for_byte_not_stripped() -> None:
+    # .strip()-ing the stored text would silently corrupt whatever
+    # store.get(accession, chunk_id) later returns for any chunk whose
+    # window starts or ends on whitespace. Task 11's verifier compares a
+    # claim against exactly this stored text, so fidelity is not cosmetic.
+    text = "\n\n\t  " + ("word\tword " * 60) + "  \n\t\n"
+    max_chars, overlap = 200, 40
+
+    chunks = chunk_items("acc", {"1": text}, max_chars=max_chars, overlap=overlap)
+
+    assert len(chunks) >= 3
+    for chunk in chunks:
+        assert chunk.text == text[chunk.start : chunk.start + max_chars]
+
+    first = chunks[0]
+    assert first.start == 0
+    assert first.text[:5] == "\n\n\t  "  # leading whitespace preserved, not stripped
+
+    last = chunks[-1]
+    assert last.text == text[last.start :]
+    assert last.text.endswith("  \n\t\n")  # trailing whitespace preserved, not stripped
+
+
+def test_chunk_ids_follow_caller_key_order_not_sorted() -> None:
+    # ParsedFiling.items is built in filing order (era.edgar.sections
+    # iterates WANTED_ITEMS), and chunk_items must preserve whatever order
+    # the caller's dict already has rather than re-sorting it -- sorting
+    # would misorder a wider item set (e.g. "10" ahead of "1A"). Using
+    # non-alphabetical keys here pins that the order is dict order, not an
+    # accident of already-sorted fixtures elsewhere in this file.
+    items = {"7": "zzz " * 100, "1": "aaa " * 100, "1A": "mmm " * 100}
+
+    chunks = chunk_items("acc", items, max_chars=1000, overlap=0)
+
+    assert [c.item for c in chunks] == ["7", "1", "1A"]

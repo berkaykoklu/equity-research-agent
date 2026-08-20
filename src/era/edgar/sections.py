@@ -114,6 +114,12 @@ _DOT_LEADER = re.compile(r"\.{5,}")
 
 @dataclass(frozen=True)
 class ParsedFiling:
+    # `items`' iteration order is part of this dataclass's contract, not an
+    # implementation detail: parse_items below builds it by inserting in
+    # WANTED_ITEMS (filing) order, and era.index.chunking.chunk_items relies
+    # on that order rather than re-sorting keys itself. A caller that
+    # rebuilds this dict from another source (e.g. `json.loads`) must
+    # preserve filing order or downstream chunk ordering silently changes.
     items: dict[str, str]
     missing: tuple[str, ...]
 
