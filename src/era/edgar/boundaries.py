@@ -176,10 +176,9 @@ auditing real filings from Microsoft, GE, JPMorgan, Chevron and others:
   number or a line of dots leading to one.
 - Some filers repeat the item text as a running header on every single
   printed page, so the same item can legitimately appear a dozen or more
-  times in a row. When that happens, choose the FIRST such repeat as the
-  section's start, and choose the first candidate belonging to the NEXT
-  item as its end -- not one of the repeats themselves, which would cut off
-  everything printed after that page.
+  times in a row. When that happens, choose the first candidate belonging to
+  the NEXT item as its end -- not one of the repeats themselves, which would
+  cut off everything printed after that page.
 - A cross-reference index near the back of the document lists items next to
   a page number or a page range (e.g. "24-31", "4-7, 9-10").
 - Some items are only a pointer stub ("see pages 165-314", "incorporated by
@@ -192,6 +191,28 @@ auditing real filings from Microsoft, GE, JPMorgan, Chevron and others:
   is usually the right end_index, since a 10-K numbers its items in one
   fixed, unbroken sequence and nothing legitimately sits between one item's
   real content and the next item's heading.
+- When several candidates exist for the SAME item -- a running header
+  repeated across pages, or a running header plus the real section start --
+  strongly prefer the candidate whose context contains that item's own
+  title: "Business" for Item 1, "Risk Factors" for Item 1A, "Management's
+  Discussion" for Item 7. A running page header repeats only the bare item
+  number ("Item 1"), never the title, because it exists to tell a reader
+  which Part/Item a printed page falls under, not to restate the section
+  name. The real section heading is the one place that carries both the
+  number and the title together. Do not default to whichever repeat happens
+  to appear first in the candidate list -- a running header can start a page
+  or two before the real section heading, and picking that earlier repeat
+  will slice off the section's own opening and everything the reader would
+  recognize as its title. This preference only ever chooses among genuine
+  section-start candidates -- it never overrides the table-of-contents or
+  cross-reference-index rules above, both of which can also contain the
+  item's title (a TOC line reads "Item 1. Business ..... 4"); a candidate
+  that looks like a TOC or index entry is never a real section start no
+  matter how strongly its context matches the title. If NONE of an item's
+  candidates contain the title -- the real heading was missed by the
+  permissive pattern, or its title falls outside the short context window --
+  fall back to the first repeat as the start rather than leaving the choice
+  unmade.
 
 For each of Item 1, Item 1A and Item 7, choose the candidate index where its
 real body begins and the candidate index where it ends, or null for "runs to
@@ -279,7 +300,29 @@ class LlmBoundarySelector:
 # validation against a warm cache after improving the prompt would silently
 # keep measuring the *old* prompt's decisions and publish that as evidence
 # the change worked.
-_DECISION_VERSION = "1"
+#
+# "2": added the title-preference bullet to _SYSTEM_PROMPT (prefer the
+# candidate whose context contains the item's own title -- "Business",
+# "Risk Factors", "Management's Discussion" -- over an earlier running-header
+# repeat that carries only the bare item number). This is the first real bump
+# of this constant: Task 19 measured MSFT's Item 1 landing on a running-header
+# repeat one page before the real heading under version "1", which this
+# prompt change exists to fix. Live-validated: MSFT recovered, no regression
+# on the other nineteen filings.
+#
+# "3": clarified the same bullet without changing the tested behaviour --
+# made explicit that the title preference never overrides the table-of-
+# contents/index rules (a TOC line also contains the title, e.g. "Item 1.
+# Business ..... 4", and must still be rejected as a TOC entry, not chosen
+# for matching the title), and restored an explicit fallback ("first repeat
+# wins") for the case where no candidate's context contains the title at
+# all -- version "2" left that case unspecified, which a code-reviewer pass
+# flagged as a real gap even though it never triggered in the 20-filing
+# sample. Not re-run live: this is a clarification of intent for an
+# untriggered edge case, not a change aimed at any observed failure, and the
+# project's live-test budget is spent deliberately, not on speculative
+# re-verification (see docs/parser-validation.md).
+_DECISION_VERSION = "3"
 
 
 class CachedBoundarySelector:
