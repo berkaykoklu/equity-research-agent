@@ -145,6 +145,45 @@ PROLIFIC_FILER_SUBMISSIONS = {
     },
 }
 
+MIXED_TYPE_FORMS_SUBMISSIONS = {
+    "cik": "0000000001",
+    "name": "Malformed Filer Inc.",
+    "filings": {
+        "recent": {
+            "accessionNumber": ["0000000001-24-000001", "0000000001-24-000002"],
+            "form": ["10-Q", None],
+            "filingDate": ["2024-11-01", "2024-10-01"],
+            "primaryDocument": ["doc.htm", "doc2.htm"],
+        }
+    },
+}
+
+ALL_NON_STRING_FORMS_SUBMISSIONS = {
+    "cik": "0000000001",
+    "name": "Malformed Filer Inc.",
+    "filings": {
+        "recent": {
+            "accessionNumber": ["0000000001-24-000001", "0000000001-24-000002"],
+            "form": [1, 2],
+            "filingDate": ["2024-11-01", "2024-10-01"],
+            "primaryDocument": ["doc.htm", "doc2.htm"],
+        }
+    },
+}
+
+EMPTY_FORMS_SUBMISSIONS = {
+    "cik": "0000000001",
+    "name": "Empty Filer Inc.",
+    "filings": {
+        "recent": {
+            "accessionNumber": [],
+            "form": [],
+            "filingDate": [],
+            "primaryDocument": [],
+        }
+    },
+}
+
 WITH_AMENDMENT_SUBMISSIONS = {
     "cik": "0000320193",
     "filings": {
@@ -340,6 +379,57 @@ def test_missing_filing_message_caps_the_forms_it_lists() -> None:
     ]
     assert len(listed_forms) <= 8
     assert "FORM-J" not in message
+
+
+@respx.mock
+def test_missing_filing_message_survives_a_mixed_type_forms_list() -> None:
+    # SEC's submissions JSON is typed dict[str, Any] on our side -- nothing
+    # guarantees every "form" entry is a string. A malformed entry must not
+    # turn the already-confusing "no annual report" error into a traceback.
+    respx.get("https://data.sec.gov/submissions/CIK0000000001.json").mock(
+        return_value=httpx.Response(200, json=MIXED_TYPE_FORMS_SUBMISSIONS)
+    )
+    client = EdgarClient(user_agent=UA, cache_dir=None)
+
+    with pytest.raises(MissingFilingError) as excinfo:
+        latest_filings(client, "0000000001")
+
+    message = str(excinfo.value)
+    assert "0000000001" in message
+    assert "10-K" in message
+    assert "10-Q" in message
+
+
+@respx.mock
+def test_missing_filing_message_survives_an_all_non_string_forms_list() -> None:
+    respx.get("https://data.sec.gov/submissions/CIK0000000001.json").mock(
+        return_value=httpx.Response(200, json=ALL_NON_STRING_FORMS_SUBMISSIONS)
+    )
+    client = EdgarClient(user_agent=UA, cache_dir=None)
+
+    with pytest.raises(MissingFilingError) as excinfo:
+        latest_filings(client, "0000000001")
+
+    message = str(excinfo.value)
+    assert "0000000001" in message
+    assert "10-K" in message
+    assert "Forms on file: none." in message
+
+
+@respx.mock
+def test_missing_filing_message_survives_an_empty_forms_list() -> None:
+    respx.get("https://data.sec.gov/submissions/CIK0000000001.json").mock(
+        return_value=httpx.Response(200, json=EMPTY_FORMS_SUBMISSIONS)
+    )
+    client = EdgarClient(user_agent=UA, cache_dir=None)
+
+    with pytest.raises(MissingFilingError) as excinfo:
+        latest_filings(client, "0000000001")
+
+    message = str(excinfo.value)
+    assert "0000000001" in message
+    assert "10-K" in message
+    assert "Forms on file: none." in message
 
 
 @respx.mock

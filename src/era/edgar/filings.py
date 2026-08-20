@@ -141,12 +141,17 @@ def latest_filings(client: EdgarClient, cik: str) -> list[Filing]:
 
 
 def _missing_filing_message(
-    data: dict[str, Any], cik: str, required_form: str, forms: list[str]
+    data: dict[str, Any], cik: str, required_form: str, forms: list[Any]
 ) -> str:
     name = data.get("name")
     entity = f"{name} (CIK {cik})" if isinstance(name, str) and name else f"CIK {cik}"
 
-    distinct_forms = sorted(set(forms))
-    forms_on_file = ", ".join(distinct_forms[:MAX_FORMS_IN_ERROR_MESSAGE])
+    # `forms` comes straight out of a JSON payload typed dict[str, Any], so
+    # nothing guarantees its elements are strings. This function only runs on
+    # the already-confusing "no annual report" path -- crashing here would
+    # replace a clear message with a traceback at exactly the moment the
+    # reader is relying on the message to explain what went wrong.
+    distinct_forms = sorted({form for form in forms if isinstance(form, str)})
+    forms_on_file = ", ".join(distinct_forms[:MAX_FORMS_IN_ERROR_MESSAGE]) or "none"
 
     return f"{entity} has filed no {required_form}. Forms on file: {forms_on_file}."
