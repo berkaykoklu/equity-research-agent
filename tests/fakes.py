@@ -10,7 +10,8 @@ import math
 
 from era.edgar.boundaries import Boundary, HeadingCandidate
 from era.index.chunking import Chunk
-from era.index.store import StoredChunk
+from era.index.embeddings import DIMENSIONS
+from era.index.store import StoredChunk, require_matching_dimensions
 
 
 class FirstMatchSelector:
@@ -51,14 +52,21 @@ class FakeEmbedder:
 
     Not a semantic embedding; it only exists so query/store tests can
     assert nearest-neighbour behaviour on inputs that share or don't share
-    vocabulary, without ever calling the real Voyage API.
+    vocabulary, without ever calling the real Voyage API. Padded with
+    trailing zeros out to DIMENSIONS so InMemoryChunkStore's dimension
+    check -- which must match what PgVectorStore enforces -- accepts these
+    vectors the same way it would a real embedder's output. The padding is
+    inert: zero contributes nothing to either the dot product or either
+    vector's norm, so cosine similarity is identical to scoring the bare
+    7-value vectors.
     """
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for text in texts:
             lowered = text.lower()
-            vectors.append([float(lowered.count(word)) for word in _VOCAB])
+            counts = [float(lowered.count(word)) for word in _VOCAB]
+            vectors.append(counts + [0.0] * (DIMENSIONS - len(counts)))
         return vectors
 
 
@@ -79,23 +87,47 @@ class InMemoryChunkStore:
     def upsert(self, chunks: list[Chunk], vectors: list[list[float]]) -> None:
         if not chunks:
             return
+        require_matching_dimensions(vectors)
+        # Build every new row -- including the strict chunk/vector pairing
+        # -- before deleting anything already stored. PgVectorStore gets
+        # this same guarantee for free from wrapping delete+insert in one
+        # transaction (a raised exception rolls it back); the fake has no
+        # transaction, so it has to earn it by not touching self._rows
+        # until it knows the whole batch is well-formed.
+        new_rows = [
+            (
+                StoredChunk(
+                    chunk_id=chunk.chunk_id,
+                    accession=chunk.accession,
+                    item=chunk.item,
+                    start=chunk.start,
+                    text=chunk.text,
+                ),
+                vector,
+            )
+            for chunk, vector in zip(chunks, vectors, strict=True)
+        ]
         accessions = {chunk.accession for chunk in chunks}
         for key in [key for key in self._rows if key[0] in accessions]:
             del self._rows[key]
-        for chunk, vector in zip(chunks, vectors, strict=True):
-            stored = StoredChunk(
-                chunk_id=chunk.chunk_id,
-                accession=chunk.accession,
-                item=chunk.item,
-                start=chunk.start,
-                text=chunk.text,
-            )
-            self._rows[(chunk.accession, chunk.chunk_id)] = (stored, vector)
+        for stored, vector in new_rows:
+            self._rows[(stored.accession, stored.chunk_id)] = (stored, vector)
 
-    def query(self, vector: list[float], item_filter: str | None, k: int) -> list[StoredChunk]:
+    def query(
+        self,
+        vector: list[float],
+        item_filter: str | None,
+        accession_filter: str | None,
+        k: int,
+    ) -> list[StoredChunk]:
+        if k < 0:
+            raise ValueError("k must not be negative")
+        require_matching_dimensions([vector])
         scored: list[tuple[float, StoredChunk]] = []
         for stored, stored_vector in self._rows.values():
             if item_filter is not None and stored.item != item_filter:
+                continue
+            if accession_filter is not None and stored.accession != accession_filter:
                 continue
             scored.append((_cosine(vector, stored_vector), stored))
         scored.sort(key=lambda pair: pair[0], reverse=True)

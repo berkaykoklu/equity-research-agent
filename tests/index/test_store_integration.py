@@ -38,8 +38,14 @@ def test_round_trips_a_chunk_through_real_pgvector(cleanup: None) -> None:
     assert fetched.text == "hello pgvector"
     assert fetched.start == 0
 
-    hits = store.query(vector, item_filter="1A", k=1)
+    # Exercises the real `<=>` operator against a stored embedding -- the
+    # path that breaks if a vector is ever handed to psycopg as a bare
+    # list instead of pgvector.Vector.
+    hits = store.query(vector, item_filter="1A", accession_filter=ACCESSION, k=1)
     assert hits[0].chunk_id == 1
+
+    other_item_hits = store.query(vector, item_filter="7", accession_filter=ACCESSION, k=1)
+    assert other_item_hits == []
 
 
 def test_upsert_deletes_stale_rows_against_real_pgvector(cleanup: None) -> None:

@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from types import TracebackType
 from typing import Protocol
 
 from era.index.chunking import Chunk
+from era.index.embeddings import DIMENSIONS
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,26 @@ class StoredChunk:
     text: str
 
 
+class VectorDimensionError(ValueError):
+    """A vector's width didn't match DIMENSIONS.
+
+    Without this check, a mis-sized embedder (wrong model, a stub client
+    someone forgot to fix) becomes an opaque psycopg error partway through
+    a transaction against the real store, or a silently-accepted vector
+    against the fake -- either way, only discovered downstream. Both
+    PgVectorStore and InMemoryChunkStore raise this at the store boundary
+    instead.
+    """
+
+
+def require_matching_dimensions(vectors: list[list[float]]) -> None:
+    for vector in vectors:
+        if len(vector) != DIMENSIONS:
+            raise VectorDimensionError(
+                f"expected {DIMENSIONS}-dimensional vectors, got {len(vector)}"
+            )
+
+
 class ChunkStore(Protocol):
     def upsert(self, chunks: list[Chunk], vectors: list[list[float]]) -> None:
         """Replace every stored row for the chunks' accession(s) with these.
@@ -27,30 +49,54 @@ class ChunkStore(Protocol):
         existing row for an accession before writing its new chunks --
         upserting row-by-row and leaving surplus old rows in place would let
         a stale chunk_id resolve to a different item's text after a
-        re-index, and a citation verifier would silently pass it.
+        re-index, and a citation verifier would silently pass it. A batch
+        can carry chunks for more than one accession; every accession
+        present must have its old rows deleted, not just the first chunk's.
         """
         ...
 
-    def query(self, vector: list[float], item_filter: str | None, k: int) -> list[StoredChunk]: ...
+    def query(
+        self,
+        vector: list[float],
+        item_filter: str | None,
+        accession_filter: str | None,
+        k: int,
+    ) -> list[StoredChunk]:
+        """Return up to k chunks nearest to vector, most similar first.
+
+        accession_filter scopes retrieval to one filing. The store holds
+        chunks from many companies at once; without this filter a query
+        issued while writing a note about one company can retrieve -- and a
+        citation can then point to -- a passage from a different company's
+        filing. item_filter narrows further, to one item within that
+        filing. Both are optional so a caller can search as broadly or as
+        narrowly as the task needs. k must not be negative.
+        """
+        ...
 
     def get(self, accession: str, chunk_id: int) -> StoredChunk | None: ...
 
 
-# pgvector 0.8.6 is already enabled on the target database; this statement
-# is harmless to repeat and only matters for a fresh database.
+# pgvector 0.8.6 is already enabled on the target database; CREATE EXTENSION
+# is harmless to repeat and only matters for a fresh database. The ALTER
+# TABLE guards against schema drift: a `chunks` table created by an earlier
+# iteration of this project (before start_offset existed) would otherwise
+# make CREATE TABLE IF NOT EXISTS a no-op and every insert would then fail
+# on a missing column.
 SCHEMA = """
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE IF NOT EXISTS chunks (
     accession TEXT NOT NULL,
     chunk_id  INTEGER NOT NULL,
     item      TEXT NOT NULL,
-    start_offset INTEGER NOT NULL,
+    start_offset INTEGER NOT NULL DEFAULT 0,
     text      TEXT NOT NULL,
     -- voyage-finance-2 (era.index.embeddings.MODEL) emits 1024-dimensional
     -- vectors; the column width has to match the embedder that fills it.
     embedding vector(1024) NOT NULL,
     PRIMARY KEY (accession, chunk_id)
 );
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS start_offset INTEGER NOT NULL DEFAULT 0;
 """
 
 
@@ -63,16 +109,44 @@ class PgVectorStore:
     """
 
     def __init__(self, dsn: str) -> None:
+        # Imported here, not at module level, so importing era.index.store
+        # -- which the fake-only test suite does transitively, via
+        # StoredChunk -- never requires psycopg or pgvector to be
+        # installed. Only constructing a real PgVectorStore does.
         import psycopg
         from pgvector.psycopg import register_vector
 
-        self._conn = psycopg.connect(dsn, autocommit=True)
+        self._conn = psycopg.connect(dsn, autocommit=True, connect_timeout=10)
         self._conn.execute(SCHEMA)
         register_vector(self._conn)
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def __enter__(self) -> "PgVectorStore":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def upsert(self, chunks: list[Chunk], vectors: list[list[float]]) -> None:
         if not chunks:
             return
+        require_matching_dimensions(vectors)
+        # psycopg's registered dumpers cover pgvector.Vector and
+        # numpy.ndarray, not a plain list -- a bare list[float] falls
+        # through to psycopg's generic ListDumper and is sent to Postgres
+        # as float8[], which pgvector's `<=>` operator does not accept.
+        # The assignment cast from array to vector happens to cover column
+        # INSERT/UPDATE, so this would look fine here and only break at
+        # query() -- wrap explicitly so both paths use the real vector type.
+        from pgvector import Vector
+
         # Delete-then-insert, in one transaction, rather than an
         # INSERT ... ON CONFLICT DO UPDATE keyed by (accession, chunk_id).
         # A per-row upsert can only ever touch chunk_ids present in the new
@@ -92,17 +166,41 @@ class PgVectorStore:
                     INSERT INTO chunks (accession, chunk_id, item, start_offset, text, embedding)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (chunk.accession, chunk.chunk_id, chunk.item, chunk.start, chunk.text, vector),
+                    (
+                        chunk.accession,
+                        chunk.chunk_id,
+                        chunk.item,
+                        chunk.start,
+                        chunk.text,
+                        Vector(vector),
+                    ),
                 )
 
-    def query(self, vector: list[float], item_filter: str | None, k: int) -> list[StoredChunk]:
+    def query(
+        self,
+        vector: list[float],
+        item_filter: str | None,
+        accession_filter: str | None,
+        k: int,
+    ) -> list[StoredChunk]:
+        if k < 0:
+            raise ValueError("k must not be negative")
+        require_matching_dimensions([vector])
+        from pgvector import Vector
+
         sql = "SELECT accession, chunk_id, item, start_offset, text FROM chunks"
+        clauses: list[str] = []
         params: list[object] = []
         if item_filter is not None:
-            sql += " WHERE item = %s"
+            clauses.append("item = %s")
             params.append(item_filter)
+        if accession_filter is not None:
+            clauses.append("accession = %s")
+            params.append(accession_filter)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY embedding <=> %s LIMIT %s"
-        params.extend([vector, k])
+        params.extend([Vector(vector), k])
         with self._conn.cursor() as cur:
             cur.execute(sql, params)
             return [
