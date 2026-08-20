@@ -10,9 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from era.edgar.boundaries import CachedBoundarySelector, LlmBoundarySelector
 from era.edgar.client import EdgarClient
 from era.edgar.filings import latest_filings, resolve_cik
 from era.edgar.sections import parse_items
+from era.graph.models import CHEAP_MODEL, build_model
 
 USER_AGENT = os.environ.get("EDGAR_USER_AGENT", "")
 
@@ -22,6 +24,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 CACHE_DIR = Path(".cache/edgar-live")
+BOUNDARY_CACHE_DIR = Path(".cache/boundaries")
 
 # A correctly extracted body opens with its own title. Anything else means the
 # parser captured a table-of-contents line or ran past a cross-reference.
@@ -86,8 +89,16 @@ def results(fetch_failures: dict[str, str]) -> dict[str, dict[str, str]]:
     symbol, a missing 10-K, a network error -- and that is a fact about
     EDGAR's data, not about the parser. Recording it in fetch_failures and
     moving on keeps one bad ticker from erasing the other nineteen results.
+
+    The selector is the real production one -- a cheap model wrapped in the
+    per-accession cache -- built here rather than at module scope, so
+    constructing it (which needs OPENAI_API_KEY) only ever happens when this
+    module's tests actually run, never on collection of the offline suite.
     """
     client = EdgarClient(user_agent=USER_AGENT, cache_dir=CACHE_DIR)
+    selector = CachedBoundarySelector(
+        LlmBoundarySelector(build_model(model_name=CHEAP_MODEL)), BOUNDARY_CACHE_DIR
+    )
     collected: dict[str, dict[str, str]] = {}
     for ticker in TICKERS:
         try:
@@ -95,7 +106,7 @@ def results(fetch_failures: dict[str, str]) -> dict[str, dict[str, str]]:
         except Exception as exc:  # noqa: BLE001 -- deliberately broad, see docstring
             fetch_failures[ticker] = f"{type(exc).__name__}: {exc}"
             continue
-        parsed = parse_items(html)
+        parsed = parse_items(html, selector)
         collected[ticker] = parsed.items
     return collected
 

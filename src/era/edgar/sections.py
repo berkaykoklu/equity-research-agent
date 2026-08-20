@@ -2,18 +2,13 @@ import re
 from dataclasses import dataclass
 from html import unescape
 
-WANTED_ITEMS = ("1", "1A", "7")
-
-# 10-Ks number Item 8 (Financial Statements) directly after Items 1, 1A and
-# 7, in that fixed order, every time. Its first line-anchored heading (see
-# _HEADING) marks the end of the region where those three items can
-# legitimately occur, so a later section -- exhibit index, signatures --
-# that happens to repeat one of their headings verbatim is excluded from
-# candidacy outright rather than merely losing a length contest it could
-# still win by being long (see _back_matter_boundary and I3). This is a
-# heuristic, not a guarantee: a filing where Item 8's heading itself goes
-# undetected loses the guard and falls back to unrestricted longest-wins.
-_BOUNDARY_ITEM = "8"
+from era.edgar.boundaries import (
+    WANTED_ITEMS,
+    Boundary,
+    BoundarySelector,
+    HeadingCandidate,
+    build_candidates,
+)
 
 _SCRIPT_OR_STYLE = re.compile(r"<(script|style)\b.*?</\1>", flags=re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
@@ -24,10 +19,10 @@ _INLINE_WHITESPACE = re.compile(r"[^\S\n]+")
 # as opposed to formatting inline within a run of text. Real item headings
 # always start a block; heading-shaped text that appears mid-sentence (a
 # cross-reference like "...as discussed in Item 7 above") never does. This
-# distinction only matters because _HEADING is anchored to line starts:
-# giving block tags a newline and every other tag nothing at all is what
-# lets that anchor tell a genuine heading apart from prose that merely
-# mentions one.
+# distinction only matters because era.edgar.boundaries' candidate pattern is
+# anchored to line starts: giving block tags a newline and every other tag
+# nothing at all is what lets that anchor tell a genuine heading apart from
+# prose that merely mentions one.
 #
 # Inline tags must be zero-width, not a space: some filers (Berkshire's
 # filing is a confirmed real example) split a single word across sibling
@@ -75,23 +70,34 @@ _BLOCK_TAGS = frozenset(
     }
 )
 
-_HEADING = re.compile(
-    r"^item\s+(?P<item>\d{1,2}[A-Z]?)(?:\s*[.:\-–—‒])?",
-    flags=re.IGNORECASE | re.MULTILINE,
-)
+# A correctly chosen body opens with its own title -- "Business", "Risk
+# Factors", "Management's Discussion...". Anything else means the selector
+# picked a table-of-contents line, a running page header, a back-of-document
+# index entry, or a cross-reference stub, none of which open that way. Task
+# 18 measured this exact check across twenty real filings (see
+# docs/parser-validation.md); it is the only guard that caught every failure
+# the old pure-regex parser missed, which is what makes it safe to hand
+# boundary selection to a model that can be wrong: a wrong pick fails this
+# check and the item is reported `missing` rather than returned as if it
+# were correct.
+EXPECTED_OPENING = {
+    "1": ("business",),
+    "1A": ("risk factor",),
+    "7": ("management", "discussion"),
+}
+OPENING_WINDOW = 120
 
-# A table of contents lists every item alongside a page number, using the
-# same "Item N. Title" text a real heading uses, so it produces a second,
-# competing match for every wanted item. A TOC entry's body is a title
-# followed by dot leaders and/or a bare page number; a real section's body
-# is paragraphs. Rejecting anything with that shape -- before bodies are
-# ever compared by length -- is what stops a long, descriptive TOC line
-# from beating a genuinely short real section (an Item 1A that just says
-# "None.", for instance, where length alone would pick the TOC line). The
-# length cap keeps this from misfiring on real content that happens to end
-# in a number.
-_TOC_ENTRY_TAIL = re.compile(r"(\.{2,}\s*\d{1,4}|\s\d{1,4})\s*$")
-_TOC_ENTRY_MAX_LENGTH = 200
+# A table-of-contents line, a back-of-document index entry ("Business
+# 4-7, 9-10, 71-73"), and an incorporated-by-reference stub ("...which
+# appear on pages 165-314") are all short -- Task 18's twenty-filing sample
+# found no genuine item body under a few thousand characters, and no decoy
+# over a few hundred. 500 sits well inside that gap. The cost is a
+# deliberate trade: a legitimately terse real item (a small filer's Item 1A
+# that just says "None.") would also fail this check and be reported
+# missing rather than returned -- accepted because no such item ever turned
+# up in the real sample, and a false "missing" is a far smaller problem than
+# a false, silently wrong body.
+MIN_BODY_CHARS = 500
 
 
 @dataclass(frozen=True)
@@ -124,70 +130,80 @@ def _to_text(html: str) -> str:
     # EDGAR filings commonly space out headings with "&nbsp;" ("Item&nbsp;1A.")
     # instead of a literal space character. Unescaping before whitespace
     # normalization turns that into U+00A0, which \s already matches, so
-    # _HEADING needs no separate handling for it.
+    # era.edgar.boundaries' candidate pattern needs no separate handling for it.
     unescaped = unescape(without_tags)
     single_spaced = _INLINE_WHITESPACE.sub(" ", unescaped)
     lines = (line.strip() for line in single_spaced.split("\n"))
     return "\n".join(line for line in lines if line)
 
 
-def _looks_like_a_toc_entry(body: str) -> bool:
-    return len(body) <= _TOC_ENTRY_MAX_LENGTH and bool(_TOC_ENTRY_TAIL.search(body))
+def _resolve_offset(candidates: list[HeadingCandidate], index: int) -> int | None:
+    # A selector's index is untrusted input, whether it came from a model or
+    # a bug in a future selector implementation. Out-of-range means the
+    # choice cannot be honoured at all; the caller treats that exactly like
+    # any other verification failure -- dropped, never guessed at.
+    if 0 <= index < len(candidates):
+        return candidates[index].offset
+    return None
 
 
-def _back_matter_boundary(text: str, matches: list[re.Match[str]]) -> int:
-    # The TOC mentions Item 8 too, ahead of every real section, so the
-    # first match for it is unusable as a boundary -- it would exclude the
-    # real Items 1, 1A and 7 that follow. The last match is the one to use:
-    # in a well-formed filing, nothing legitimately says "Item 8" again
-    # after the real Item 8 section itself begins.
-    boundary = len(text)
-    for match in matches:
-        if match.group("item").upper() == _BOUNDARY_ITEM:
-            boundary = match.start()
-    return boundary
+def _verified_body(
+    item: str, text: str, candidates: list[HeadingCandidate], boundary: Boundary
+) -> str | None:
+    start_offset = _resolve_offset(candidates, boundary.start_index)
+    if start_offset is None:
+        return None
+
+    end_offset: int
+    if boundary.end_index is None:
+        end_offset = len(text)
+    else:
+        resolved_end = _resolve_offset(candidates, boundary.end_index)
+        if resolved_end is None:
+            return None
+        end_offset = resolved_end
+
+    if end_offset <= start_offset:
+        return None
+
+    body = text[start_offset:end_offset].strip()
+    if len(body) < MIN_BODY_CHARS:
+        return None
+
+    opening = body[:OPENING_WINDOW].lower()
+    if not any(word in opening for word in EXPECTED_OPENING[item]):
+        return None
+
+    return body
 
 
-def parse_items(html: str) -> ParsedFiling:
+def parse_items(html: str, selector: BoundarySelector) -> ParsedFiling:
     """Split a filing into the items we care about.
 
-    Every 10-K lists its items twice: once in the table of contents and once
-    as the actual sections, and both match the same heading pattern. Filers
-    also cross-reference items by name in running prose ("...as discussed in
-    Item 7 above"), which matches too if nothing stops it.
+    Choosing which "Item N" occurrence is a genuine section start is a
+    judgment call a regex cannot make reliably (see era.edgar.boundaries for
+    why); this function owns everything downstream of that choice instead.
+    build_candidates finds every place that could be a heading, `selector`
+    -- a model, in production; a fake, in every test -- decides which
+    candidates are real boundaries, and this function slices the raw text at
+    those offsets and verifies the result before trusting it.
 
-    _HEADING is anchored to the start of a line, so a heading-shaped
-    cross-reference buried mid-sentence never counts as a match at all --
-    only text that starts its own block does. What survives that is
-    filtered again: _looks_like_a_toc_entry drops table-of-contents lines by
-    shape, and _back_matter_boundary drops anything past the start of Item 8,
-    since exhibits and signatures always come after it. Only once a
-    candidate has passed both filters does the longest surviving body for
-    each item win.
+    Verification never raises: a selector can be wrong, and a wrong pick
+    degrades to that item being reported `missing`, not a crash and not a
+    silently wrong body. That is what makes it safe to plug an unreliable
+    selector into this function in the first place.
     """
     text = _to_text(html)
-    matches = list(_HEADING.finditer(text))
-    boundary = _back_matter_boundary(text, matches)
+    candidates = build_candidates(text)
+    chosen = selector.select(candidates)
 
     bodies: dict[str, str] = {}
-    for index, match in enumerate(matches):
-        item = match.group("item").upper()
-        if item not in WANTED_ITEMS:
+    for item in WANTED_ITEMS:
+        boundary = chosen.get(item)
+        if boundary is None:
             continue
-        if match.start() >= boundary:
-            continue
-
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        body = text[match.end() : end].strip()
-        if _looks_like_a_toc_entry(body):
-            continue
-
-        # Longest body wins: a TOC line that slipped past the shape filter
-        # above would still be short, while the real section -- even a
-        # terse one like "None." -- is already sitting in `bodies` as a
-        # valid candidate, so comparing lengths here is what finishes
-        # telling them apart.
-        if len(body) > len(bodies.get(item, "")):
+        body = _verified_body(item, text, candidates, boundary)
+        if body is not None:
             bodies[item] = body
 
     missing = tuple(item for item in WANTED_ITEMS if item not in bodies)
