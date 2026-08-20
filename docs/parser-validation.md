@@ -7,7 +7,14 @@ against the original pure-regex parser (Task 18), and the second (this task)
 against the hybrid model-selector redesign plus a targeted prompt fix. Only
 the second measurement reflects the current code.
 
-## Current result (Task 19, `_DECISION_VERSION = "2"`)
+## Current result (Task 19, `_DECISION_VERSION = "3"`)
+
+*Provenance: these numbers were first measured under `_DECISION_VERSION = "2"`.
+A subsequent clarity-only prompt edit bumped the version to `"3"` without a
+re-run, which would have left this document describing a prompt the code no
+longer used. The suite was therefore re-run against `"3"` on 2026-08-20 —
+all five tests pass and the results below are unchanged. Evidence for a
+prompt that is not the shipped prompt is worse than no evidence.*
 
 **Zero wrong content across all twenty target tickers.** Every item the
 parser returns opens with its own title (`Business`, `Risk Factors`,
