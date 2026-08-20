@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from era.edgar.client import DATA_API_MAX_AGE_SECONDS, EdgarClient
 
@@ -22,6 +23,14 @@ WANTED_FORMS = ("10-K", "10-Q")
 # absence is an error rather than an empty result. The 10-Q is supporting
 # material and stays optional.
 REQUIRED_FORMS = ("10-K",)
+
+# A restructuring can transfer a well-known ticker to a newly formed holding
+# company (SEC's tell is form 8-K12B, the successor-issuer report) that has
+# filed quarterlies but has not yet reached its first annual report. That is
+# a legitimate, if confusing, state -- not a bug -- so the error just needs
+# to name the entity and show what it does file rather than try to trace the
+# succession back to a predecessor, which would be speculative.
+MAX_FORMS_IN_ERROR_MESSAGE = 8
 
 
 class UnknownTickerError(LookupError):
@@ -124,6 +133,20 @@ def latest_filings(client: EdgarClient, cik: str) -> list[Filing]:
 
     for required_form in REQUIRED_FORMS:
         if required_form not in best_by_form:
-            raise MissingFilingError(f"CIK {cik} has no {required_form} in its recent filings")
+            raise MissingFilingError(
+                _missing_filing_message(data, cik, required_form, recent["form"])
+            )
 
     return [best_by_form[form] for form in WANTED_FORMS if form in best_by_form]
+
+
+def _missing_filing_message(
+    data: dict[str, Any], cik: str, required_form: str, forms: list[str]
+) -> str:
+    name = data.get("name")
+    entity = f"{name} (CIK {cik})" if isinstance(name, str) and name else f"CIK {cik}"
+
+    distinct_forms = sorted(set(forms))
+    forms_on_file = ", ".join(distinct_forms[:MAX_FORMS_IN_ERROR_MESSAGE])
+
+    return f"{entity} has filed no {required_form}. Forms on file: {forms_on_file}."
