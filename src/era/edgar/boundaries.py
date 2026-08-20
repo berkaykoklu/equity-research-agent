@@ -28,36 +28,38 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
+from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
+
+from era.graph.models import CHEAP_MODEL, build_model
 
 WANTED_ITEMS = ("1", "1A", "7")
 
-# Item 8 (Financial Statements) is not one of the three items this parser
-# extracts, but its heading is still worth finding: a 10-K numbers Item 8
-# directly after Items 1, 1A and 7, in that fixed order, every single time.
-# Without some later candidate to point at, Item 7 -- always the last of the
-# three wanted items -- could only ever be bounded by another 1/1A/7 mention
-# (rare) or run to the end of the document, swallowing exhibits, signatures
-# and financial-statement footnotes into what should have been a clean
-# section. Surfacing Item 8 gives the model a real anchor to end Item 7 at.
-# It is never a candidate the model can *start* a section at, because the
-# response schema below has no field for it -- it only ever gets used as an
-# end_index.
-_BOUNDARY_ANCHOR_ITEM = "8"
-_CANDIDATE_ITEMS = frozenset(WANTED_ITEMS) | {_BOUNDARY_ANCHOR_ITEM}
-
 CONTEXT_CHARS = 140
 
+# A pathological or malformed document could in principle repeat "item" an
+# unbounded number of times; without a cap, that would translate directly
+# into an unbounded prompt. 400 is far beyond anything a real 10-K produces
+# (the twenty-filing sample topped out at a few dozen, even counting every
+# item number and every running-header repeat) -- this exists purely as a
+# safety valve, not a tuning knob.
+MAX_CANDIDATES = 400
+
 # Deliberately permissive: a delimiter is optional and the line need not be
-# short. Precision is the model's job -- this only has to avoid missing a
-# real heading. Anchored to the start of a line (see era.edgar.sections'
-# _to_text: block tags become newlines, everything else does not), so a
-# heading-shaped phrase buried mid-sentence -- "...as discussed in Item 7
-# above" -- never counts as a candidate at all, no model judgment needed.
+# short, and every item number is captured, not just the three this parser
+# extracts (see build_candidates' own comment below for why). Precision is
+# the model's job -- this only has to avoid missing a real heading. Anchored
+# to the start of a line (see era.edgar.sections' _to_text: block tags
+# become newlines, everything else does not), so a heading-shaped phrase
+# buried mid-sentence -- "...as discussed in Item 7 above" -- never counts
+# as a candidate at all, no model judgment needed. The character class
+# between "item" and the number is `[ \t]`, plain space or tab -- _to_text
+# already folds &nbsp; into a plain space before this pattern ever runs, so
+# nothing extra is needed here for that.
 _CANDIDATE = re.compile(
-    r"^[ \t]*item[ \t ]+(?P<item>\d{1,2}[A-Za-z]?)[ \t]*[.:\-‒–—]?",
+    r"^[ \t]*item[ \t]+(?P<item>\d{1,2}[A-Za-z]?)[ \t]*[.:\-‒–—]?",
     flags=re.IGNORECASE | re.MULTILINE,
 )
 
@@ -65,7 +67,7 @@ _CANDIDATE = re.compile(
 @dataclass(frozen=True)
 class HeadingCandidate:
     index: int  # position in the candidate list -- what the model refers to
-    item: str  # "1", "1A", "7", or "8" (boundary-anchor only, never selectable as a start)
+    item: str  # the item number as printed: "1", "1A", "2", "7A", "8", etc.
     offset: int  # character offset of the match start in the full text
     context: str  # a short window so the model can judge what this line is
 
@@ -77,11 +79,27 @@ class Boundary:
 
 
 def build_candidates(text: str) -> list[HeadingCandidate]:
+    # Every item number is a candidate, not just 1, 1A and 7 -- including
+    # the ones this parser never extracts (2, 3, 1B, 7A, and so on). A 10-K
+    # numbers its items in one unbroken sequence, and a real Item 1A section
+    # ends wherever the next real item heading begins, whichever number that
+    # happens to be: Properties, Legal Proceedings and Mine Safety routinely
+    # sit between Risk Factors and MD&A, and Item 7A sits between Item 7 and
+    # Item 8. An earlier version of this function filtered candidates down
+    # to {1, 1A, 7, 8} on the theory that only Item 8 was needed as an end
+    # anchor for Item 7; that missed that 1A and 7 both need an end anchor
+    # too, and any item in between it filtered out was invisible to the
+    # model as anywhere to stop -- so a selector had no way to end Item 1A
+    # anywhere except at the real Item 7 heading, silently absorbing every
+    # item in between into what should have been a short section. The
+    # response schema below still only ever lets the model *start* a
+    # section at Item 1, 1A or 7 -- every other item number is only ever
+    # usable as an end_index.
     candidates: list[HeadingCandidate] = []
     for match in _CANDIDATE.finditer(text):
+        if len(candidates) >= MAX_CANDIDATES:
+            break
         item = match.group("item").upper()
-        if item not in _CANDIDATE_ITEMS:
-            continue
         window = text[match.start() : match.start() + CONTEXT_CHARS]
         candidates.append(
             HeadingCandidate(
@@ -96,6 +114,20 @@ def build_candidates(text: str) -> list[HeadingCandidate]:
 
 class BoundarySelector(Protocol):
     def select(self, candidates: list[HeadingCandidate]) -> dict[str, Boundary]: ...
+
+
+class BoundarySelectionError(RuntimeError):
+    """A selector could not produce a decision at all -- distinct from a
+    selector correctly deciding "no real section exists" (an empty dict).
+
+    That distinction is what CachedBoundarySelector relies on to know
+    whether a result is safe to persist forever: a transient API error,
+    a timeout, or a malformed response is not a fact about the document
+    and must never be cached as though it were one. Only exceptions of
+    this type propagate past era.edgar.sections.parse_items' own guard --
+    see the try/except there -- so a selector failure degrades one filing
+    to `missing`, not a crash that aborts an entire batch run.
+    """
 
 
 # --- model-backed selector -------------------------------------------------
@@ -144,19 +176,22 @@ auditing real filings from Microsoft, GE, JPMorgan, Chevron and others:
   number or a line of dots leading to one.
 - Some filers repeat the item text as a running header on every single
   printed page, so the same item can legitimately appear a dozen or more
-  times in a row. When that happens, the section's real body runs from the
-  FIRST such repeat to the LAST -- not just one of them, and not the one
-  with the most text around it.
+  times in a row. When that happens, choose the FIRST such repeat as the
+  section's start, and choose the first candidate belonging to the NEXT
+  item as its end -- not one of the repeats themselves, which would cut off
+  everything printed after that page.
 - A cross-reference index near the back of the document lists items next to
   a page number or a page range (e.g. "24-31", "4-7, 9-10").
 - Some items are only a pointer stub ("see pages 165-314", "incorporated by
   reference") with the real discussion elsewhere in the document, never
   under its own "Item N" heading anywhere you can point to.
-- A few candidates are labelled item "8" (Financial Statements). You can
-  never choose one of these as a section's start -- they exist only so you
-  can use one as Item 7's end_index, since Item 8 always follows Item 7
-  immediately in a 10-K and its heading is the correct place for Item 7 to
-  stop.
+- Many candidates are for item numbers other than 1, 1A and 7 -- Properties,
+  Legal Proceedings, Item 1B, Item 7A, Item 8, and so on. You can never
+  choose one of these as a section's start -- only Items 1, 1A and 7 are
+  ever real answers here -- but the nearest one after an item's real start
+  is usually the right end_index, since a 10-K numbers its items in one
+  fixed, unbroken sequence and nothing legitimately sits between one item's
+  real content and the next item's heading.
 
 For each of Item 1, Item 1A and Item 7, choose the candidate index where its
 real body begins and the candidate index where it ends, or null for "runs to
@@ -181,30 +216,52 @@ class LlmBoundarySelector:
     every body those integers produce before trusting it.
     """
 
-    def __init__(self, model: object) -> None:
-        # `model` is a BaseChatModel; typed loosely here (see
-        # era.graph.models.build_model) so this module doesn't need
-        # langchain_core.language_models imported just for a type hint.
-        self._structured = model.with_structured_output(_BoundaryResponse)  # type: ignore[attr-defined]
+    def __init__(self, model: BaseChatModel | None = None) -> None:
+        # Defaulting to the cheap model here -- not build_model's own
+        # default, which is the expensive drafting model -- is deliberate.
+        # Boundary selection is an integers-only task with no reason to
+        # ever need the expensive model; this is the one call site where
+        # forgetting to override the default would silently multiply the
+        # cost of every filing's boundary decision by 10-50x.
+        resolved_model = model if model is not None else build_model(model_name=CHEAP_MODEL)
+        self._structured = resolved_model.with_structured_output(_BoundaryResponse)
 
     def select(self, candidates: list[HeadingCandidate]) -> dict[str, Boundary]:
         if not candidates:
             # Nothing to ask about -- and nothing worth spending a model
-            # call on.
+            # call on. This is a genuine, deterministic fact about the
+            # document (it has no "item"-shaped text anywhere), not a
+            # failure, so returning {} here is safe to cache.
             return {}
 
-        response = self._structured.invoke(
-            [
-                ("system", _SYSTEM_PROMPT),
-                ("human", _format_candidates(candidates)),
-            ]
-        )
+        try:
+            response = self._structured.invoke(
+                [
+                    ("system", _SYSTEM_PROMPT),
+                    ("human", _format_candidates(candidates)),
+                ]
+            )
+        except Exception as exc:
+            # A timeout, a rate limit, an auth failure surviving
+            # build_model's retries, or with_structured_output raising on
+            # a response it couldn't parse into JSON at all -- none of
+            # these are a fact about the document, so they must never be
+            # allowed to look like one. Raising a distinct type here (see
+            # BoundarySelectionError's docstring) is what lets
+            # CachedBoundarySelector tell "the model decided nothing" apart
+            # from "the model never answered" and refuse to cache the
+            # latter.
+            raise BoundarySelectionError(f"boundary selection call failed: {exc}") from exc
+
         if not isinstance(response, _BoundaryResponse):
             # with_structured_output can be configured to return a raw dict
             # instead of the pydantic model; this project never does that,
-            # but if it ever changed, failing closed (nothing chosen, every
-            # item ends up `missing`) is safer than guessing at a shape.
-            return {}
+            # but if it ever changed, this is an integration bug, not a
+            # decision about the document -- same reasoning as the except
+            # block above, so it gets the same treatment.
+            raise BoundarySelectionError(
+                f"expected a _BoundaryResponse, got {type(response).__name__}"
+            )
 
         chosen: dict[str, Boundary] = {}
         for item, field in _FIELD_BY_ITEM.items():
@@ -216,6 +273,13 @@ class LlmBoundarySelector:
 
 
 # --- caching wrapper ---------------------------------------------------
+
+# Bump this whenever _SYSTEM_PROMPT, the candidate schema, or the model
+# changes in a way that could change a decision. Without it, re-running
+# validation against a warm cache after improving the prompt would silently
+# keep measuring the *old* prompt's decisions and publish that as evidence
+# the change worked.
+_DECISION_VERSION = "1"
 
 
 class CachedBoundarySelector:
@@ -230,6 +294,13 @@ class CachedBoundarySelector:
     to keying on the filing's accession number without this layer needing to
     know what an accession number is.
 
+    Only a successful inner decision is ever written: if `inner.select`
+    raises (see BoundarySelectionError), that exception propagates from this
+    method too, without touching the cache -- there is nothing to cache when
+    the model never actually answered. A genuine decision, including a
+    genuine "no real section here" (an empty dict), is cached and trusted
+    from then on.
+
     Same atomic-write discipline as EdgarClient: write to a uniquely-named
     temp file, then os.replace onto the real path, so a crash mid-write can
     only ever leave the temp file damaged -- never a truncated cache entry
@@ -242,18 +313,45 @@ class CachedBoundarySelector:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _cache_path(self, candidates: list[HeadingCandidate]) -> Path:
-        key = json.dumps([[c.item, c.offset] for c in candidates], separators=(",", ":"))
+        key = json.dumps(
+            {
+                "version": _DECISION_VERSION,
+                "candidates": [[c.item, c.offset] for c in candidates],
+            },
+            separators=(",", ":"),
+        )
         digest = hashlib.sha256(key.encode()).hexdigest()[:32]
         return self._cache_dir / f"{digest}.json"
 
     def select(self, candidates: list[HeadingCandidate]) -> dict[str, Boundary]:
         path = self._cache_path(candidates)
-        if path.exists():
-            return _boundaries_from_json(json.loads(path.read_text(encoding="utf-8")))
+        cached = self._read_cache(path)
+        if cached is not None:
+            return cached
 
+        # If this raises, it propagates as-is -- no write below runs, so a
+        # transient failure is never mistaken for a decision worth keeping.
         chosen = self._inner.select(candidates)
         self._write_cache(path, chosen)
         return chosen
+
+    def _read_cache(self, path: Path) -> dict[str, Boundary] | None:
+        # Any problem reading or parsing an existing cache file -- it was
+        # truncated by a crash before this class existed, hand-edited,
+        # written by some future incompatible version of this format -- is
+        # treated as a plain cache miss: recompute via the inner selector,
+        # then overwrite the bad file with a fresh, valid one. A corrupt
+        # cache entry must never be trusted (it would otherwise resurface
+        # as a crash deep inside era.edgar.sections' offset resolution,
+        # nowhere near where the real problem is) and must never abort a
+        # run either -- it degrades exactly like a selector failure does.
+        if not path.exists():
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return _boundaries_from_json(raw)
 
     def _write_cache(self, path: Path, chosen: dict[str, Boundary]) -> None:
         payload = {
@@ -269,12 +367,29 @@ class CachedBoundarySelector:
             raise
 
 
-def _boundaries_from_json(payload: dict[str, dict[str, int | None]]) -> dict[str, Boundary]:
+def _boundaries_from_json(payload: Any) -> dict[str, Boundary] | None:
+    # `payload` is genuinely Any -- it came from json.loads on a file this
+    # process didn't necessarily write in this exact shape -- so every
+    # level here is a real runtime check, not a type-checker-only
+    # annotation. Any shape mismatch at all returns None, which the caller
+    # treats as a cache miss.
+    if not isinstance(payload, dict):
+        return None
     chosen: dict[str, Boundary] = {}
     for item, raw in payload.items():
+        if not isinstance(item, str) or not isinstance(raw, dict):
+            return None
+        # _write_cache always writes both keys explicitly, so a genuine
+        # cache entry never has one missing -- treating an absent key as
+        # "default to None" here would let a truncated or hand-edited file
+        # silently pass as valid instead of being recomputed.
+        if "start_index" not in raw or "end_index" not in raw:
+            return None
         start = raw["start_index"]
-        if start is None:  # pragma: no cover -- defensive; _write_cache never writes this
-            continue
-        end = raw["end_index"]
+        if not isinstance(start, int) or isinstance(start, bool):
+            return None
+        end = raw.get("end_index")
+        if end is not None and (not isinstance(end, int) or isinstance(end, bool)):
+            return None
         chosen[item] = Boundary(start_index=start, end_index=end)
     return chosen

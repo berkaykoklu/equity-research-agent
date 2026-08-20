@@ -88,9 +88,9 @@ def test_a_late_cross_reference_does_not_swallow_the_rest_of_the_filing() -> Non
     # exhibit index/signature back matter is mid-sentence, so it was never a
     # candidate in the first place (build_candidates is line-anchored). What
     # actually bounds Item 7 here is the Item 8 heading right after it --
-    # build_candidates surfaces Item 8 purely as an anchor for exactly this
-    # -- so even the naive first-match selector keeps exhibits and
-    # signatures out.
+    # build_candidates surfaces every item number as a boundary anchor, not
+    # just the three this parser extracts -- so even the naive first-match
+    # selector keeps exhibits and signatures out.
     parsed = parse_items(
         (FIXTURES / "filing_late_cross_reference.html").read_text(), FirstMatchSelector()
     )
@@ -98,6 +98,30 @@ def test_a_late_cross_reference_does_not_swallow_the_rest_of_the_filing() -> Non
     assert "services growth" in parsed.items["7"]
     assert "SIGNATURES" not in parsed.items["7"]
     assert "exhibit" not in parsed.items["7"].lower()
+    assert parsed.missing == ()
+
+
+def test_items_between_1a_and_7_bound_1as_body_instead_of_being_swallowed() -> None:
+    # The critical case an earlier version of this parser got wrong: Items
+    # 1B (Unresolved Staff Comments), 2 (Properties), 3 (Legal Proceedings)
+    # and 4 (Mine Safety Disclosures) routinely sit between Risk Factors and
+    # MD&A in a real 10-K. build_candidates used to surface only {1, 1A, 7,
+    # 8} as candidates -- Item 1A then had no candidate to end at except the
+    # real Item 7 heading, so its body silently absorbed Properties, Legal
+    # Proceedings and everything else in between. Every item number is now
+    # a candidate (never selectable as a *start* except 1, 1A and 7 -- see
+    # boundaries.py's response schema), so even the naive first-match
+    # selector stops Item 1A at the very next heading, whatever number it
+    # is, rather than running all the way to Item 7.
+    parsed = parse_items(
+        (FIXTURES / "filing_items_between_1a_and_7.html").read_text(), FirstMatchSelector()
+    )
+
+    assert "supply chain concentration" in parsed.items["1A"]
+    assert "Properties" not in parsed.items["1A"]
+    assert "Legal Proceedings" not in parsed.items["1A"]
+    assert "Mine Safety" not in parsed.items["1A"]
+    assert "services growth" in parsed.items["7"]
     assert parsed.missing == ()
 
 
@@ -328,3 +352,78 @@ def test_a_wrong_but_in_range_index_is_rejected_by_the_opening_check() -> None:
 
     assert "1" not in parsed.items
     assert "1" in parsed.missing
+
+
+def test_a_toc_start_paired_with_a_real_end_is_rejected_by_the_dot_leader_check() -> None:
+    # Neither MIN_BODY_CHARS nor EXPECTED_OPENING catches this on their own:
+    # a selector that picks the TOC line as Item 1's start and the real
+    # Item 1A heading as its end produces a body that opens with "Item 1.
+    # Business" (passes the opening check, same word a real section starts
+    # with) and is long enough to include every TOC entry plus the genuine
+    # Item 1 content that follows (passes the length check easily). What
+    # gives it away is that the swallowed TOC entries carry dot leaders
+    # ("Item 1A. Risk Factors ..... 15"), a shape no genuine section body
+    # has.
+    fixture = "filing_with_toc.html"
+    candidates = _candidates(fixture)
+    boundaries = {
+        "1": Boundary(_nth_index(candidates, "1", 0), _nth_index(candidates, "1A", 1)),
+    }
+    parsed = parse_items((FIXTURES / fixture).read_text(), ScriptedSelector(boundaries))
+
+    assert "1" not in parsed.items
+    assert "1" in parsed.missing
+
+
+def test_a_reversed_boundary_is_rejected() -> None:
+    # end_index pointing at an earlier offset than start_index -- swapped,
+    # or simply wrong -- must never be sliced as if start and end meant
+    # what their names say.
+    fixture = "filing_simple.html"
+    candidates = _candidates(fixture)
+    boundaries = {
+        "7": Boundary(
+            start_index=_nth_index(candidates, "7", 0),
+            end_index=_nth_index(candidates, "1", 0),
+        ),
+    }
+    parsed = parse_items((FIXTURES / fixture).read_text(), ScriptedSelector(boundaries))
+
+    assert "7" not in parsed.items
+    assert "7" in parsed.missing
+
+
+def test_a_selector_that_raises_degrades_the_filing_to_missing_not_a_crash() -> None:
+    # A selector call can fail entirely -- a network timeout, a malformed
+    # model response (see era.edgar.boundaries.BoundarySelectionError) -- and
+    # parse_items must not let that abort whatever loop is processing a
+    # batch of filings. One bad response costs this filing's items, not the
+    # whole run.
+    class _RaisingSelector:
+        def select(self, candidates: list[HeadingCandidate]) -> dict[str, Boundary]:
+            raise RuntimeError("simulated selector failure")
+
+    parsed = parse_items((FIXTURES / "filing_simple.html").read_text(), _RaisingSelector())
+
+    assert parsed.items == {}
+    assert parsed.missing == ("1", "1A", "7")
+
+
+def test_verified_body_rejects_a_start_offset_that_is_not_strictly_increasing() -> None:
+    # Direct unit test of the ordering guard in isolation: identical
+    # candidates and boundary, the only difference is whether a preceding
+    # item's start offset is passed in. WANTED_ITEMS' fixed order (1, 1A, 7)
+    # is what parse_items uses to build this constraint as it iterates.
+    from era.edgar.sections import _verified_body
+
+    text = "Item 1A. Risk Factors\n" + ("Our results vary from period to period. " * 20)
+    candidates = build_candidates(text)
+    boundary = Boundary(start_index=0, end_index=None)
+
+    unconstrained = _verified_body("1A", text, candidates, boundary, minimum_start_offset=None)
+    constrained = _verified_body(
+        "1A", text, candidates, boundary, minimum_start_offset=candidates[0].offset
+    )
+
+    assert unconstrained is not None
+    assert constrained is None

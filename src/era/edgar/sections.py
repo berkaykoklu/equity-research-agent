@@ -99,6 +99,18 @@ OPENING_WINDOW = 120
 # a false, silently wrong body.
 MIN_BODY_CHARS = 500
 
+# Neither check above catches a selector that picks a table-of-contents
+# line as an item's *start* and a later real heading as its *end*: the
+# slice runs from "Item 1. Business ..... 3" through every other TOC entry
+# up to the real Item 1A heading, opens with the word "Business" same as
+# the genuine section would, and is easily long enough to clear
+# MIN_BODY_CHARS -- it just happens to be front matter, not content. A run
+# of five or more dots is the one shape a genuine section body never has
+# (dot leaders are a table-of-contents-specific typesetting convention) but
+# a TOC-shaped body reliably does, so it is a direct, cheap test for
+# exactly this failure regardless of length or opening words.
+_DOT_LEADER = re.compile(r"\.{5,}")
+
 
 @dataclass(frozen=True)
 class ParsedFiling:
@@ -148,10 +160,24 @@ def _resolve_offset(candidates: list[HeadingCandidate], index: int) -> int | Non
 
 
 def _verified_body(
-    item: str, text: str, candidates: list[HeadingCandidate], boundary: Boundary
-) -> str | None:
+    item: str,
+    text: str,
+    candidates: list[HeadingCandidate],
+    boundary: Boundary,
+    minimum_start_offset: int | None,
+) -> tuple[str, int] | None:
     start_offset = _resolve_offset(candidates, boundary.start_index)
     if start_offset is None:
+        return None
+
+    # Items are always filed in the fixed order 1, 1A, 7 -- WANTED_ITEMS'
+    # own order, which parse_items iterates in below. A start offset that
+    # doesn't come strictly after the previous accepted item's start means
+    # the selector picked something out of order (pointed two items at the
+    # same heading, or went backward), which is never correct in a
+    # well-formed filing and is worth rejecting on its own, independent of
+    # the dot-leader check below.
+    if minimum_start_offset is not None and start_offset <= minimum_start_offset:
         return None
 
     end_offset: int
@@ -170,11 +196,14 @@ def _verified_body(
     if len(body) < MIN_BODY_CHARS:
         return None
 
+    if _DOT_LEADER.search(body):
+        return None
+
     opening = body[:OPENING_WINDOW].lower()
     if not any(word in opening for word in EXPECTED_OPENING[item]):
         return None
 
-    return body
+    return body, start_offset
 
 
 def parse_items(html: str, selector: BoundarySelector) -> ParsedFiling:
@@ -188,23 +217,32 @@ def parse_items(html: str, selector: BoundarySelector) -> ParsedFiling:
     candidates are real boundaries, and this function slices the raw text at
     those offsets and verifies the result before trusting it.
 
-    Verification never raises: a selector can be wrong, and a wrong pick
-    degrades to that item being reported `missing`, not a crash and not a
-    silently wrong body. That is what makes it safe to plug an unreliable
-    selector into this function in the first place.
+    Nothing here ever raises: a selector call itself can fail (a timeout, a
+    malformed model response -- see era.edgar.boundaries.BoundarySelectionError)
+    exactly as easily as a selector can simply choose wrong, and both
+    degrade the same way -- the affected item is reported `missing`, never a
+    crash and never a silently wrong body. That is what makes it safe to
+    plug an unreliable selector into this function in the first place.
     """
     text = _to_text(html)
     candidates = build_candidates(text)
-    chosen = selector.select(candidates)
+    try:
+        chosen = selector.select(candidates)
+    except Exception:  # noqa: BLE001 -- deliberately broad, see the docstring above
+        chosen = {}
 
     bodies: dict[str, str] = {}
+    previous_start_offset: int | None = None
     for item in WANTED_ITEMS:
         boundary = chosen.get(item)
         if boundary is None:
             continue
-        body = _verified_body(item, text, candidates, boundary)
-        if body is not None:
-            bodies[item] = body
+        result = _verified_body(item, text, candidates, boundary, previous_start_offset)
+        if result is None:
+            continue
+        body, start_offset = result
+        bodies[item] = body
+        previous_start_offset = start_offset
 
     missing = tuple(item for item in WANTED_ITEMS if item not in bodies)
     return ParsedFiling(items=bodies, missing=missing)

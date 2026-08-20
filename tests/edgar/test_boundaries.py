@@ -3,7 +3,9 @@ from pathlib import Path
 import pytest
 
 from era.edgar.boundaries import (
+    MAX_CANDIDATES,
     Boundary,
+    BoundarySelectionError,
     CachedBoundarySelector,
     HeadingCandidate,
     LlmBoundarySelector,
@@ -13,33 +15,44 @@ from era.edgar.boundaries import (
 )
 
 
-def test_build_candidates_finds_every_wanted_item_and_the_item_8_anchor() -> None:
+def test_build_candidates_finds_every_item_number_not_just_the_wanted_three() -> None:
+    # Every item number is a candidate, including ones this parser never
+    # extracts -- Item 1A's real end anchor is often Item 1B, 2 or 3, not
+    # Item 7 directly, and a filter that dropped those would leave the
+    # selector with no way to bound 1A anywhere except at Item 7 itself,
+    # silently absorbing everything in between (the bug this test guards).
     text = (
         "Item 1. Business\n"
         "We design things.\n"
         "Item 1A. Risk Factors\n"
         "Stuff.\n"
+        "Item 1B. Unresolved Staff Comments\n"
+        "None.\n"
+        "Item 2. Properties\n"
+        "More.\n"
         "Item 7. MD&A\n"
         "More stuff.\n"
+        "Item 7A. Market Risk\n"
+        "Some.\n"
         "Item 8. Financial Statements\n"
         "Done."
     )
 
     candidates = build_candidates(text)
 
-    assert [c.item for c in candidates] == ["1", "1A", "7", "8"]
-    assert [c.index for c in candidates] == [0, 1, 2, 3]
+    assert [c.item for c in candidates] == ["1", "1A", "1B", "2", "7", "7A", "8"]
+    assert [c.index for c in candidates] == list(range(7))
 
 
-def test_build_candidates_excludes_items_that_are_neither_wanted_nor_the_anchor() -> None:
-    # Item 8 is kept as a boundary anchor for Item 7 (see boundaries.py), but
-    # nothing else needs it -- Item 2 has no bearing on any of the three
-    # sections this parser extracts, so it should never even reach the model.
-    text = "Item 1. Business\nStuff.\nItem 2. Properties\nMore.\nItem 7. MD&A\nDone."
+def test_build_candidates_caps_at_max_candidates() -> None:
+    # A safety valve, not a tuning knob: a pathological document repeating
+    # "item" without bound must not turn into an unbounded prompt.
+    text = "Item 1. Something\n" * (MAX_CANDIDATES + 50)
 
     candidates = build_candidates(text)
 
-    assert [c.item for c in candidates] == ["1", "7"]
+    assert len(candidates) == MAX_CANDIDATES
+    assert [c.index for c in candidates] == list(range(MAX_CANDIDATES))
 
 
 def test_build_candidates_ignores_a_heading_shaped_mid_sentence_mention() -> None:
@@ -119,6 +132,67 @@ def test_cached_boundary_selector_round_trips_a_null_end_index(tmp_path: Path) -
     assert result == {"1": Boundary(start_index=0, end_index=None)}
 
 
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "not json at all {{{",
+        '{"1": {"start_index": 0}}',  # missing end_index key
+        '{"1": {"start_index": "zero", "end_index": null}}',  # wrong type
+        '{"1": "not even an object"}',
+        "[]",  # valid JSON, wrong top-level shape
+    ],
+)
+def test_cached_boundary_selector_treats_a_corrupt_cache_file_as_a_miss(
+    tmp_path: Path, contents: str
+) -> None:
+    # A cache file can be damaged by anything -- a crash mid-write from a
+    # version of this code that didn't yet have the atomic-write discipline,
+    # a hand edit, a future incompatible format. None of that should ever
+    # reach _resolve_offset as a live TypeError; it should look exactly like
+    # a cache miss and get recomputed.
+    candidates = build_candidates("Item 1. Business\nStuff.")
+    cached = CachedBoundarySelector(_CountingSelector({}), tmp_path)
+    path = cached._cache_path(candidates)
+    path.write_text(contents, encoding="utf-8")
+
+    inner = _CountingSelector({"1": Boundary(start_index=0, end_index=None)})
+    result = CachedBoundarySelector(inner, tmp_path).select(candidates)
+
+    assert inner.calls == 1
+    assert result == {"1": Boundary(start_index=0, end_index=None)}
+    # The bad file is overwritten with a fresh, valid one, so a third read
+    # doesn't need to recompute again.
+    third_inner = _CountingSelector({})
+    CachedBoundarySelector(third_inner, tmp_path).select(candidates)
+    assert third_inner.calls == 0
+
+
+def test_cached_boundary_selector_never_persists_a_selector_failure(tmp_path: Path) -> None:
+    candidates = build_candidates("Item 1. Business\nStuff.")
+    failing = _RaisingSelector()
+    cached = CachedBoundarySelector(failing, tmp_path)
+
+    with pytest.raises(BoundarySelectionError):
+        cached.select(candidates)
+
+    # No cache file was written for a failed decision...
+    assert cached._cache_path(candidates).exists() is False
+    # ...so a second attempt asks the inner selector again rather than
+    # trusting a cached failure forever.
+    with pytest.raises(BoundarySelectionError):
+        cached.select(candidates)
+    assert failing.calls == 2
+
+
+class _RaisingSelector:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def select(self, candidates: list[HeadingCandidate]) -> dict[str, Boundary]:
+        self.calls += 1
+        raise BoundarySelectionError("simulated transient failure")
+
+
 class _CountingSelector:
     """Records how many times select() actually ran the inner decision."""
 
@@ -132,20 +206,23 @@ class _CountingSelector:
 
 
 class _FakeStructuredRunnable:
-    def __init__(self, response: object) -> None:
+    def __init__(self, response: object = None, error: Exception | None = None) -> None:
         self._response = response
+        self._error = error
         self.invocations: list[object] = []
 
     def invoke(self, prompt: object) -> object:
         self.invocations.append(prompt)
+        if self._error is not None:
+            raise self._error
         return self._response
 
 
 class _FakeChatModel:
     """Stands in for a BaseChatModel: offline, no network, no API key needed."""
 
-    def __init__(self, response: object) -> None:
-        self._runnable = _FakeStructuredRunnable(response)
+    def __init__(self, response: object = None, error: Exception | None = None) -> None:
+        self._runnable = _FakeStructuredRunnable(response, error)
 
     def with_structured_output(self, schema: object) -> _FakeStructuredRunnable:
         return self._runnable
@@ -180,17 +257,53 @@ def test_llm_boundary_selector_returns_empty_without_calling_the_model_for_no_ca
     assert model._runnable.invocations == []
 
 
-def test_llm_boundary_selector_fails_closed_on_an_unexpected_response_shape() -> None:
+def test_llm_boundary_selector_raises_on_an_unexpected_response_shape() -> None:
     # with_structured_output can be configured to hand back a raw dict
     # instead of the pydantic model; this project never does that, but if a
-    # future change did, every item should end up missing, not crash.
+    # future change did, that's an integration bug, not a fact about the
+    # document -- it must raise, not silently look like a genuine "no real
+    # section" decision that CachedBoundarySelector would then cache forever.
     model = _FakeChatModel(response={"item_1": {"start_index": 0}})
     selector = LlmBoundarySelector(model)
     candidates = build_candidates("Item 1. Business\nStuff.")
 
-    chosen = selector.select(candidates)
+    with pytest.raises(BoundarySelectionError):
+        selector.select(candidates)
 
-    assert chosen == {}
+
+def test_llm_boundary_selector_raises_when_the_model_call_itself_fails() -> None:
+    # A timeout, a rate limit, an auth failure surviving build_model's
+    # retries -- none of these are a fact about the document. This is the
+    # case CachedBoundarySelector relies on never being swallowed into {}.
+    model = _FakeChatModel(error=TimeoutError("simulated network timeout"))
+    selector = LlmBoundarySelector(model)
+    candidates = build_candidates("Item 1. Business\nStuff.")
+
+    with pytest.raises(BoundarySelectionError):
+        selector.select(candidates)
+
+
+def test_llm_boundary_selector_defaults_to_the_cheap_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Boundary selection is an integers-only task -- there is never a reason
+    # for it to default to build_model's own default, which is the
+    # expensive drafting model. Omitting the model argument entirely must
+    # not silently multiply the cost of every filing's decision.
+    import era.edgar.boundaries as boundaries_module
+    from era.graph.models import CHEAP_MODEL
+
+    calls: list[str] = []
+
+    def _fake_build_model(provider: str = "openai", model_name: str = "", **_: object) -> object:
+        calls.append(model_name)
+        return _FakeChatModel(response=_BoundaryResponse())
+
+    monkeypatch.setattr(boundaries_module, "build_model", _fake_build_model)
+
+    LlmBoundarySelector()
+
+    assert calls == [CHEAP_MODEL]
 
 
 @pytest.mark.parametrize("provider", ["openai"])
