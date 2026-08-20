@@ -192,10 +192,18 @@ structurally cannot, namely EDGAR changing its response shape.
 - Golden-set tickers ship pre-indexed, so a first visit answers immediately.
 - Research progress streams per node, which is also what makes the graph's
   parallelism visible — the reason the UI exists at all.
-- **On-demand generation is open**: any visitor may generate a fresh report for an
-  indexed ticker. Cost is ~$0.13 per trigger with no cap. Accepted deliberately for
-  demo quality. The runs table records per-run cost, so a spend ceiling is a small
-  addition if the URL ever attracts unwanted attention.
+- **The demo serves pre-generated reports only. Live generation is off.**
+  Reports for the indexed universe are produced once from the CLI, stored, and served
+  as static content, so a visitor costs nothing and the page answers instantly.
+
+  This reverses an earlier decision. Open generation was accepted for demo quality
+  when the budget was assumed to be tens of dollars; the project's actual total
+  budget is **$7**, and at ~$0.13 per run that is ~54 visitors — one person holding
+  down refresh. A public URL with an uncapped spend path behind it is not a
+  defensible design at any budget, and is indefensible at this one.
+
+  If live generation is ever wanted, it must arrive with a spend ceiling enforced
+  against the runs table, not as an open endpoint.
 
 ## Repo structure
 

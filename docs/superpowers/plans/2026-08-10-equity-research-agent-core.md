@@ -3360,3 +3360,305 @@ reviewed round — this task measures, it does not fix.
 git -C "<repo>" add tests/edgar/test_sections_live.py docs/parser-validation.md
 git -C "<repo>" commit -m "test: validate item parser against twenty real 10-K filings"
 ```
+
+---
+
+### Task 19: Rework the item parser as a hybrid boundary selector
+
+**Supersedes the pure-regex implementation of Task 6.** Task 6's `parse_items` stays
+as the candidate finder; the *choice* of which candidate starts a real section moves
+to a language model, and the *cutting* stays in code.
+
+**Why.** Task 18 ran the regex parser over twenty real 10-Ks: six failed. The root
+cause is that the matcher cannot tell a genuine section start from anything else
+saying "Item N" — Microsoft repeats it as a running page header ~12x per item, GE's
+only occurrences are an index with page ranges, JPMorgan's Item 7 is a pointer to
+unlabelled prose 150 pages away. That is a judgment problem, not a pattern problem.
+
+**The division of labour, and it is the point of this task:**
+
+- **Code finds candidates.** Every position matching a permissive heading pattern.
+- **The model picks boundaries.** It sees only the candidates plus a line of context
+  each — never the document, never any content it could reproduce.
+- **Code slices the raw text** at the chosen offsets. The model's output is a set of
+  integers, so it cannot paraphrase, summarise, or silently drop a paragraph.
+- **Code verifies the result** with the same check Task 18 uses: a body must open with
+  its own title. A failed check marks the item `missing`, never accepts a guess.
+- **The decision is cached per accession.** A filed document never changes, so a
+  filing is decided once and replayed thereafter — which restores determinism.
+
+Cost: roughly **$0.0005 per filing** on `gpt-5.6-luna` (~30 candidates × ~300 chars of
+context ≈ 2.3k input tokens, a few tokens out). Twenty filings costs about a penny.
+This matters — the project has a hard $7 total budget.
+
+**Files:**
+- Create: `src/era/edgar/boundaries.py`, `src/era/graph/models.py`, `tests/edgar/test_boundaries.py`
+- Modify: `src/era/edgar/sections.py`, `tests/edgar/test_sections.py`
+
+**Interfaces:**
+- Consumes: nothing new
+- Produces: `HeadingCandidate`, `Boundary`, `BoundarySelector` (Protocol),
+  `LlmBoundarySelector`, `CachedBoundarySelector`, `build_candidates(text)`,
+  `build_model(provider, model_name, temperature)`, and a reworked
+  `parse_items(html, selector)`
+
+- [ ] **Step 1: Fix the tag-spacing defect first, on its own**
+
+Berkshire's filing splits words across sibling tags —
+`<span>Item 1. Busines</span><span>s Description</span>` — and the current
+tag-to-space conversion inserts a space mid-word, yielding `Busines s Description`.
+Inline tags must be zero-width; only block-level tags become whitespace.
+
+In `src/era/edgar/sections.py`, split the tag handling: replace block-level tags
+(`p`, `div`, `tr`, `td`, `th`, `li`, `ul`, `ol`, `table`, `br`, `h1`-`h6`, `section`,
+`article`) with a newline, and **delete every other tag without inserting anything**.
+
+Write the failing test first, with a fixture reproducing the split word:
+```python
+def test_a_word_split_across_inline_tags_stays_whole() -> None:
+    html = "<p><span>Item 1. Busines</span><span>s Description</span></p><p>We sell things.</p>"
+
+    assert "Business Description" in _to_text(html)
+    assert "Busines s" not in _to_text(html)
+```
+Run it, watch it fail, fix, watch it pass, commit separately from the rest of this task.
+
+- [ ] **Step 2: Write the candidate finder**
+
+`src/era/edgar/boundaries.py`:
+```python
+"""Choosing where a 10-K item starts is judgment, not pattern matching.
+
+Code finds every place that could be a heading; a model picks which ones are real;
+code does the cutting. The model never sees document content and never returns
+text — only indices — so it cannot paraphrase or drop a paragraph.
+"""
+
+import re
+from dataclasses import dataclass
+from typing import Protocol
+
+WANTED_ITEMS = ("1", "1A", "7")
+CONTEXT_CHARS = 140
+
+# Deliberately permissive: a delimiter is optional and the line need not be short.
+# Precision is the model's job — this only has to avoid missing a real heading.
+_CANDIDATE = re.compile(
+    r"^[ \t]*item[ \t ]+(?P<item>\d{1,2}[A-Za-z]?)[ \t]*[.:\-–—]?",
+    flags=re.IGNORECASE | re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class HeadingCandidate:
+    index: int          # position in the candidate list, what the model refers to
+    item: str           # "1", "1A", "7"
+    offset: int         # character offset of the match start in the full text
+    context: str        # a short window so the model can judge what this line is
+
+
+@dataclass(frozen=True)
+class Boundary:
+    start_index: int    # candidate index where the item's body begins
+    end_index: int | None  # candidate index where it ends; None means end of document
+
+
+def build_candidates(text: str) -> list[HeadingCandidate]:
+    candidates: list[HeadingCandidate] = []
+    for match in _CANDIDATE.finditer(text):
+        item = match.group("item").upper()
+        if item not in WANTED_ITEMS:
+            continue
+        window = text[match.start() : match.start() + CONTEXT_CHARS]
+        candidates.append(
+            HeadingCandidate(
+                index=len(candidates),
+                item=item,
+                offset=match.start(),
+                context=" ".join(window.split()),
+            )
+        )
+    return candidates
+```
+
+- [ ] **Step 3: Write the selector Protocol and the fake**
+
+Same pattern as `Embedder` and `ChunkStore` — the external surface sits behind a
+Protocol so every test runs offline and free.
+
+Append to `boundaries.py`:
+```python
+class BoundarySelector(Protocol):
+    def select(self, candidates: list[HeadingCandidate]) -> dict[str, Boundary]: ...
+```
+
+In `tests/fakes.py`:
+```python
+class FirstMatchSelector:
+    """Picks the first candidate per item and runs to the next candidate.
+
+    Deliberately naive — it reproduces the pre-Task-19 regex behaviour, so tests
+    can assert what the real selector must do better.
+    """
+
+    def select(self, candidates):
+        from era.edgar.boundaries import Boundary
+
+        chosen: dict[str, Boundary] = {}
+        for candidate in candidates:
+            if candidate.item in chosen:
+                continue
+            following = next(
+                (c.index for c in candidates if c.index > candidate.index), None
+            )
+            chosen[candidate.item] = Boundary(candidate.index, following)
+        return chosen
+
+
+class ScriptedSelector:
+    """Returns boundaries a test dictates, so slicing and guards can be tested alone."""
+
+    def __init__(self, boundaries):
+        self._boundaries = boundaries
+
+    def select(self, candidates):
+        return self._boundaries
+```
+
+- [ ] **Step 4: Write the model-backed selector**
+
+`src/era/graph/models.py` — create it here; Task 12 will reuse it rather than
+redefining it:
+```python
+from langchain_core.language_models import BaseChatModel
+
+DRAFTING_MODEL = "gpt-5.6-terra"
+CHEAP_MODEL = "gpt-5.6-luna"
+
+
+def build_model(
+    provider: str = "openai",
+    model_name: str = DRAFTING_MODEL,
+    temperature: float = 0.0,
+) -> BaseChatModel:
+    """One seam for the provider. Swapping is a config change, not a rewrite."""
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(model=model_name, temperature=temperature)
+    if provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(model=model_name, temperature=temperature)
+    raise ValueError(f"unknown provider: {provider}")
+```
+
+Append to `boundaries.py` an `LlmBoundarySelector` taking a `BaseChatModel`. Use
+structured output so the model returns integers, never prose. The prompt must:
+
+- list each candidate as `index | item | context`
+- explain the three traps found in real filings, because the model cannot infer them:
+  a table of contents lists every item near the front; **some filers repeat the item
+  as a running page header on every page, so the same item legitimately appears a
+  dozen times and the body runs from the first to the last**; an index at the back
+  lists items with page numbers or page ranges
+- ask, per item, for the candidate index where the real body starts and the candidate
+  index where it ends, or null if no real section exists in this document
+- state plainly that answering null is correct and expected when the document only
+  contains references, and is preferred over guessing
+
+- [ ] **Step 5: Write the caching wrapper**
+
+A filed document never changes, so a boundary decision is made once. This is what
+restores determinism after introducing a model.
+
+`CachedBoundarySelector` wraps another selector, keyed by a hash of the candidate
+list (offsets and items), storing JSON under a supplied cache directory. Same
+atomic-write discipline as `EdgarClient`: temp file plus `os.replace`, never a
+partial file that a later run trusts.
+
+- [ ] **Step 6: Rework `parse_items` to slice and verify**
+
+`parse_items(html, selector)` now: build text → build candidates → ask the selector →
+slice raw text between chosen offsets → **verify each body** → return `ParsedFiling`.
+
+The verification is the safety net that lets an unreliable selector be used safely:
+```python
+# A correctly chosen body opens with its own title. Anything else means the model
+# picked an index line, a cross-reference, or a running header. Task 18 measured
+# this exact check across twenty real filings; it is the only guard that caught
+# the failures the regex missed.
+EXPECTED_OPENING = {
+    "1": ("business",),
+    "1A": ("risk factor",),
+    "7": ("management", "discussion"),
+}
+OPENING_WINDOW = 120
+MIN_BODY_CHARS = 500
+```
+A body failing either check is dropped and its item recorded in `missing` with the
+reason. **Never accept an unverified body**, and never let a verification failure
+raise — coverage degrades, the run continues.
+
+- [ ] **Step 7: Test the whole path offline**
+
+Using `ScriptedSelector` and `FirstMatchSelector`, plus fixtures reproducing the real
+failures Task 18 found:
+- a filing with the item repeated as a running page header on every page (Microsoft's
+  shape) — assert the verified body spans the whole section, not one page
+- a filing whose only occurrences are a back-of-document index with page ranges
+  (GE's shape) — assert the item lands in `missing`, not a captured index line
+- a filing whose Item 7 is a pointer stub (JPMorgan's shape) — assert `missing`
+- the word-split fixture from Step 1 — assert the heading survives intact
+- a selector returning a deliberately wrong index — assert the guard rejects it and
+  the item lands in `missing`
+
+That last one matters most: it proves the design is safe when the model is wrong.
+
+- [ ] **Step 8: Verify and commit**
+
+```bash
+uv run --directory "<repo>" ruff check .
+uv run --directory "<repo>" ruff format --check .
+uv run --directory "<repo>" mypy src
+uv run --directory "<repo>" pytest -q
+git -C "<repo>" add src/era/edgar/boundaries.py src/era/graph/models.py src/era/edgar/sections.py tests/
+git -C "<repo>" commit -m "feat: choose item boundaries with a model, slice and verify in code"
+```
+
+---
+
+### Task 20: Handle tickers that resolve to a shell with no annual report
+
+**Found by Task 18, not by any unit test.** `XOM` resolves to CIK 0002115436,
+"ExxonMobil Holdings Corp" — a holdco created in a restructuring, with no 10-K on
+file. `latest_filings` raised deep in the run with nothing explaining that the ticker
+resolved to an entity that simply does not file.
+
+**Files:** Modify `src/era/edgar/filings.py`, `tests/edgar/test_filings.py`
+
+- [ ] **Step 1: Write the failing test**
+```python
+@respx.mock
+def test_reports_a_ticker_whose_entity_files_no_annual_report() -> None:
+    # A restructuring can point a well-known ticker at a holding company that has
+    # never filed a 10-K. XOM did exactly this. The error must name the entity so
+    # the cause is obvious from the message alone.
+    respx.get("https://www.sec.gov/files/company_tickers.json").mock(
+        return_value=httpx.Response(200, json=HOLDCO_TICKERS)
+    )
+    respx.get("https://data.sec.gov/submissions/CIK0002115436.json").mock(
+        return_value=httpx.Response(200, json=NO_ANNUAL_REPORT_SUBMISSIONS)
+    )
+    client = EdgarClient(user_agent=UA, cache_dir=None)
+
+    with pytest.raises(MissingFilingError) as excinfo:
+        latest_filings(client, resolve_cik(client, "XOM"))
+
+    assert "0002115436" in str(excinfo.value)
+    assert "10-K" in str(excinfo.value)
+```
+Include the entity name from the submissions payload in the message if present.
+
+- [ ] **Step 2-4:** Run it failing, implement, run it passing.
+- [ ] **Step 5: Commit** — `fix: name the entity when a ticker resolves to a non-filing shell`
