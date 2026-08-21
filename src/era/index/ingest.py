@@ -1,3 +1,5 @@
+import sys
+import traceback
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -92,16 +94,40 @@ def ingest_ticker(
 
             chunks = chunk_items(filing.accession, parsed.items)
             if chunks:
+                # Skipped when this filing produced zero chunks -- e.g.
+                # every item failed verification on a re-ingest. Both
+                # ChunkStore implementations (PgVectorStore and the fake)
+                # already no-op an empty upsert internally, so this guard
+                # isn't the sole thing enforcing it -- but it makes the
+                # intent explicit at the call site: a previous successful
+                # run's rows for this accession are deliberately left in
+                # place, queryable, rather than deleted with nothing to
+                # replace them. chunks_written only ever counts work that
+                # actually reached the store, so the result still reports
+                # this filing as contributing zero chunks; it is the
+                # store's rows, not the result, that keep the old data. See
+                # test_ingest_a_zero_chunk_reingest_keeps_the_previous_runs_rows,
+                # which pins the observable end-to-end behaviour regardless
+                # of which layer (this guard or ChunkStore.upsert's own
+                # no-op) is responsible for it.
                 vectors = embedder.embed([chunk.text for chunk in chunks])
                 store.upsert(chunks, vectors)
-            chunks_written += len(chunks)
+                chunks_written += len(chunks)
             accessions.append(filing.accession)
-        except Exception as exc:  # noqa: BLE001 -- deliberately broad: a
-            # network blip, a store outage, an embedder error -- none of it
-            # may abort the run or hide a filing that already succeeded.
-            # era.cli prints this and exits non-zero rather than letting a
-            # partial run look like either a full success or a bare crash.
+        except Exception as exc:
+            # Deliberately broad: a network blip, a store outage, an
+            # embedder error -- none of it may abort the run or hide a
+            # filing that already succeeded. era.cli prints this and exits
+            # non-zero rather than letting a partial run look like either a
+            # full success or a bare crash.
             failures[filing.accession] = f"{type(exc).__name__}: {exc}"
+            # The structured message above is what era.cli's report shows;
+            # this traceback is a separate, unstructured debug aid to
+            # stderr so a genuinely unexpected failure during a
+            # money-spending run isn't lost entirely. It doesn't violate
+            # "only era.cli prints or formats" -- there's no formatting
+            # here, no stdout, and no data any caller could depend on.
+            traceback.print_exc(file=sys.stderr)
 
     return IngestResult(
         cik=cik,

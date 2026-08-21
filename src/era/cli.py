@@ -66,14 +66,24 @@ def _report(result: IngestResult) -> None:
 @app.command()
 def ingest(ticker: str) -> None:
     """Fetch, parse, chunk and index a company's latest 10-K."""
-    settings = Settings()  # type: ignore[call-arg]
-    selector = CachedBoundarySelector(LlmBoundarySelector(), BOUNDARY_CACHE_DIR)
+    # Everything that can raise on a first, misconfigured run lives inside
+    # this try, not just ingest_ticker itself: Settings() raises pydantic's
+    # ValidationError when EDGAR_USER_AGENT is unset; EdgarClient(...) raises
+    # MissingUserAgentError when it's set but malformed (no contact info);
+    # PgVectorStore(...) raises psycopg.OperationalError against an empty or
+    # unreachable DATABASE_URL; and resolve_cik (inside ingest_ticker) raises
+    # an httpx error when SEC is unreachable. era.cli is the only module
+    # that prints or formats -- constructing any of these outside the try
+    # would let their exceptions reach the user as a bare traceback instead
+    # of a message naming what failed.
+    try:
+        settings = Settings()  # type: ignore[call-arg]
+        selector = CachedBoundarySelector(LlmBoundarySelector(), BOUNDARY_CACHE_DIR)
 
-    with (
-        EdgarClient(user_agent=settings.edgar_user_agent, cache_dir=EDGAR_CACHE_DIR) as client,
-        PgVectorStore(dsn=settings.database_url) as store,
-    ):
-        try:
+        with (
+            EdgarClient(user_agent=settings.edgar_user_agent, cache_dir=EDGAR_CACHE_DIR) as client,
+            PgVectorStore(dsn=settings.database_url) as store,
+        ):
             result = ingest_ticker(
                 ticker,
                 client,
@@ -81,12 +91,21 @@ def ingest(ticker: str) -> None:
                 VoyageEmbedder(api_key=settings.voyage_api_key),
                 store,
             )
-        except LookupError as exc:
-            # Covers both UnknownTickerError (bad ticker) and
-            # MissingFilingError (no 10-K on file) -- both are facts worth a
-            # clear message and a nonzero exit, never a bare traceback.
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(code=1) from exc
+    except LookupError as exc:
+        # Covers both UnknownTickerError (bad ticker) and
+        # MissingFilingError (no 10-K on file) -- both are facts worth a
+        # clear message and a nonzero exit, never a bare traceback.
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        # Everything else that can go wrong constructing or running this
+        # command: bad config (ValidationError, MissingUserAgentError), an
+        # unreachable database (psycopg.OperationalError), being offline or
+        # SEC being down (httpx errors) before the per-filing loop in
+        # ingest_ticker even starts. Name the exception and its message --
+        # not a full traceback -- and exit non-zero.
+        typer.echo(f"ingest failed: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     _report(result)
 

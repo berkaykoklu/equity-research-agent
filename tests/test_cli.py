@@ -246,3 +246,49 @@ def test_ingest_exits_nonzero_when_the_required_10k_contributes_zero_chunks(
 
     assert result.exit_code == 1
     assert "chunks written: 0" in result.output
+
+
+def test_ingest_names_the_failure_instead_of_a_bare_traceback_when_settings_construction_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Settings(), EdgarClient(...), PgVectorStore(...) and
+    # LlmBoundarySelector() are all constructed outside ingest_ticker, in
+    # era.cli.ingest itself -- an unset EDGAR_USER_AGENT raises pydantic's
+    # ValidationError right here, before the per-filing try/except inside
+    # ingest_ticker ever gets a chance to run. Without a try wrapping this
+    # construction, the CliRunner would show a raw traceback (or, outside a
+    # test harness, print one directly), not a message naming what failed.
+    class _ExplodingSettings:
+        def __init__(self) -> None:
+            raise ValueError("edgar_user_agent\n  Field required")
+
+    monkeypatch.setattr(cli, "Settings", _ExplodingSettings)
+
+    result = runner.invoke(cli.app, ["ingest", "AAPL"])
+
+    assert result.exit_code == 1
+    assert "ingest failed" in result.output
+    assert "Field required" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_ingest_names_the_failure_when_the_store_cannot_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A malformed or unreachable DATABASE_URL raises inside PgVectorStore's
+    # constructor -- also outside ingest_ticker, also before the per-filing
+    # try/except exists to catch anything.
+    class _ExplodingStore:
+        def __init__(self, dsn: str) -> None:
+            raise RuntimeError("connection to server failed")
+
+    monkeypatch.setattr(cli, "PgVectorStore", _ExplodingStore)
+
+    result = runner.invoke(cli.app, ["ingest", "AAPL"])
+
+    assert result.exit_code == 1
+    assert "ingest failed" in result.output
+    assert "connection to server failed" in result.output
+    assert "Traceback" not in result.output
+    # A failure this early must not also print a success-shaped report.
+    assert "chunks written" not in result.output

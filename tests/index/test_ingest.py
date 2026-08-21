@@ -1,3 +1,5 @@
+from types import MappingProxyType
+
 import httpx
 import pytest
 import respx
@@ -6,7 +8,7 @@ from tests.fakes import FakeEmbedder, FirstMatchSelector, InMemoryChunkStore
 from era.edgar.client import EdgarClient
 from era.edgar.filings import Filing, MissingFilingError, UnknownTickerError
 from era.index.chunking import DEFAULT_MAX_CHARS
-from era.index.ingest import ingest_ticker
+from era.index.ingest import IngestResult, ingest_ticker
 from era.index.store import StoredChunk
 
 UA = "Berkay Koklu kokluberkay@gmail.com"
@@ -379,6 +381,146 @@ def test_ingest_records_a_per_filing_failure_and_keeps_the_others(
     )
 
     assert result.accessions == (filing_a.accession,)
-    assert result.chunks_written > 0
+    # Pinned to an exact count, not just `> 0`: a surviving mutant moves
+    # `chunks_written += len(chunks)` above the `if chunks:`/store.upsert
+    # block, so a filing whose store write raised would still have its
+    # chunk count added to the total -- chunks_written would report work
+    # that never reached the store. Comparing against the store's own row
+    # count for the surviving filing is what catches that: if filing_b's
+    # (never-written) chunks leaked into the total, this equality breaks.
+    hits = store.query([0.0] * len(FakeEmbedder().embed(["x"])[0]), None, None, k=1000)
+    assert result.chunks_written == len(hits) > 0
     assert filing_b.accession in result.failures
     assert "simulated store outage" in result.failures[filing_b.accession]
+
+
+@respx.mock
+def test_ingest_a_zero_chunk_reingest_keeps_the_previous_runs_rows() -> None:
+    # Deliberate, not a bug -- see the comment in ingest_ticker above the
+    # `if chunks:` block. store.upsert (and the delete inside it) only ever
+    # runs when a filing produces new chunks; a re-ingest whose document
+    # fails verification for every item must leave a previous good run's
+    # rows in place rather than deleting them and writing nothing. Pinning
+    # this means a future "always upsert, even with zero chunks" change
+    # shows up here as a real, visible behaviour change instead of quietly
+    # passing as a cleanup.
+    good_html = _filing_html(include_item_7=True)
+    # Headings present (so candidates exist for the selector to pick) but
+    # every body under era.edgar.sections.MIN_BODY_CHARS (500), so
+    # verification rejects all three items regardless of selector.
+    bad_html = (
+        "<p>Item 1. Business</p><p>Too short.</p>"
+        "<p>Item 1A. Risk Factors</p><p>Too short.</p>"
+        "<p>Item 7. Management's Discussion and Analysis</p><p>Too short.</p>"
+    )
+    respx.get("https://www.sec.gov/files/company_tickers.json").mock(
+        return_value=httpx.Response(200, json=TICKERS)
+    )
+    respx.get(f"https://data.sec.gov/submissions/CIK{CIK}.json").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "filings": {
+                    "recent": {
+                        "accessionNumber": [ACCESSION],
+                        "form": ["10-K"],
+                        "filingDate": ["2024-11-01"],
+                        "primaryDocument": ["aapl.htm"],
+                    }
+                }
+            },
+        )
+    )
+    doc_url = "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl.htm"
+    respx.get(doc_url).mock(
+        side_effect=[
+            httpx.Response(200, text=good_html),
+            httpx.Response(200, text=bad_html),
+        ]
+    )
+    store = InMemoryChunkStore()
+    client = EdgarClient(user_agent=UA, cache_dir=None)
+
+    first = ingest_ticker("AAPL", client, FirstMatchSelector(), FakeEmbedder(), store)
+    assert first.chunks_written > 0
+
+    second = ingest_ticker("AAPL", client, FirstMatchSelector(), FakeEmbedder(), store)
+
+    assert second.chunks_written == 0
+    assert second.items_missing == {ACCESSION: ("1", "1A", "7")}
+    hits = store.query([0.0] * len(FakeEmbedder().embed(["x"])[0]), None, None, k=1000)
+    assert len(hits) == first.chunks_written
+
+
+class _CountingEmbedder:
+    """Wraps FakeEmbedder, counting how many times embed() itself is called.
+
+    Distinguishes "one batched call per filing" from "one call per chunk" --
+    both produce the same vectors and the same chunks_written, so nothing
+    else in this suite can tell them apart. Against a metered embedding
+    API, the difference is one request per filing versus one request per
+    chunk (a 10-K routinely has hundreds).
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._inner = FakeEmbedder()
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        return self._inner.embed(texts)
+
+
+@respx.mock
+def test_ingest_makes_exactly_one_embed_call_per_filing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Pins "ingest cannot bypass batching": replacing the single
+    # `embedder.embed([...])` call with a per-chunk loop would still produce
+    # correct chunks, correct vectors and a correct chunks_written count --
+    # nothing else in this suite would notice -- while turning one request
+    # per filing into one request per chunk against a metered API.
+    import era.index.ingest as ingest_module
+
+    filing_a, filing_b = _two_10k_filings()
+    monkeypatch.setattr(ingest_module, "resolve_cik", lambda client, ticker: CIK)
+    monkeypatch.setattr(ingest_module, "latest_filings", lambda client, cik: [filing_a, filing_b])
+    respx.get(filing_a.primary_document_url).mock(
+        return_value=httpx.Response(200, text=_filing_html(include_item_7=True))
+    )
+    respx.get(filing_b.primary_document_url).mock(
+        return_value=httpx.Response(200, text=_filing_html(include_item_7=True))
+    )
+    store = InMemoryChunkStore()
+    counting_embedder = _CountingEmbedder()
+
+    ingest_ticker(
+        "AAPL",
+        EdgarClient(user_agent=UA, cache_dir=None),
+        FirstMatchSelector(),
+        counting_embedder,  # type: ignore[arg-type]
+        store,
+    )
+
+    assert counting_embedder.calls == 2
+
+
+def test_ingest_result_items_missing_and_failures_are_immutable() -> None:
+    # The comment on IngestResult argues MappingProxyType makes these
+    # fields immutable; nothing verified that claim. frozen=True alone only
+    # stops reassigning result.items_missing itself, not mutating the dict
+    # it points to -- a MappingProxyType-backed field must reject item
+    # assignment too.
+    result = IngestResult(
+        cik=CIK,
+        accessions=(ACCESSION,),
+        chunks_written=1,
+        items_missing=MappingProxyType({}),
+        failures=MappingProxyType({}),
+    )
+
+    with pytest.raises(TypeError):
+        result.items_missing["7"] = ("oops",)  # type: ignore[index]
+
+    with pytest.raises(TypeError):
+        result.failures[ACCESSION] = "oops"  # type: ignore[index]

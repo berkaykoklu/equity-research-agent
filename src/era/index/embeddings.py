@@ -100,6 +100,16 @@ class VoyageEmbedder:
         vectors: list[list[float]] = []
         for batch in _batch_texts(texts):
             result = self._client.embed(batch, model=MODEL, input_type="document")
+            # A short response (fewer embeddings than documents sent) must
+            # be caught here, at the embedder boundary, not left to surface
+            # later as store.upsert's zip(strict=True) ValueError -- which
+            # would point a debugger at the store when the real fault is a
+            # malformed Voyage response.
+            if len(result.embeddings) != len(batch):
+                raise ValueError(
+                    f"voyage returned {len(result.embeddings)} embeddings "
+                    f"for a batch of {len(batch)} documents"
+                )
             # voyageai types this as list[list[float]] | list[list[int]]
             # because an all-integer response would parse that way; coerce
             # so callers (and PgVectorStore's vector column) get a

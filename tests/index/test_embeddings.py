@@ -1,3 +1,5 @@
+import pytest
+
 from era.index.embeddings import (
     MAX_BATCH_SIZE,
     MAX_CHARS_PER_REQUEST,
@@ -54,14 +56,22 @@ def test_batch_texts_returns_nothing_for_no_input() -> None:
 
 
 class _RecordingClient:
-    """Stands in for voyageai.client.Client -- offline, no network, no key."""
+    """Stands in for voyageai.client.Client -- offline, no network, no key.
+
+    Returns a text-derived vector (the text's length, distinct per input)
+    rather than a constant one. A constant vector (e.g. [[0.0] * 3 for _ in
+    batch]) makes every result indistinguishable, so a bug that pairs the
+    wrong vector with the wrong text -- e.g. iterating _batch_texts(texts) in
+    reversed order -- would still make every test pass. With distinct
+    per-text vectors, an ordering bug becomes a visible mismatch.
+    """
 
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
 
     def embed(self, batch: list[str], model: str, input_type: str) -> "_FakeEmbedResult":
         self.calls.append(list(batch))
-        return _FakeEmbedResult([[0.0] * 3 for _ in batch])
+        return _FakeEmbedResult([[float(len(text))] * 3 for text in batch])
 
 
 class _FakeEmbedResult:
@@ -80,3 +90,44 @@ def test_voyage_embedder_sends_one_request_per_batch_and_concatenates_results() 
     assert len(recording.calls) > 1
     assert sum(len(call) for call in recording.calls) == len(texts)
     assert len(vectors) == len(texts)
+
+
+def test_voyage_embedder_returns_vectors_in_input_order_across_multiple_batches() -> None:
+    # Regression for a surviving mutant: `for batch in
+    # reversed(_batch_texts(texts))` still passes count- and
+    # batch-count-only assertions, because store.upsert's zip(strict=True)
+    # only checks that the number of vectors matches the number of chunks --
+    # it can't tell a vector landed on the wrong chunk. Distinct-length
+    # texts, each producing a distinct vector, make a swapped pairing
+    # visible: the returned vectors must match the *input* order, not
+    # whatever order the batches happened to be sent in.
+    embedder = VoyageEmbedder(api_key="voyage-fake")
+    embedder._client = _RecordingClient()  # type: ignore[assignment]
+    # Distinct lengths, spanning multiple batches (MAX_BATCH_SIZE=128).
+    texts = [f"text-{i}-{'x' * i}" for i in range(150)]
+
+    vectors = embedder.embed(texts)
+
+    expected = [[float(len(text))] * 3 for text in texts]
+    assert vectors == expected
+
+
+class _ShortResponseClient:
+    """Returns one fewer embedding than documents sent -- a malformed response."""
+
+    def embed(self, batch: list[str], model: str, input_type: str) -> "_FakeEmbedResult":
+        return _FakeEmbedResult([[0.0] * 3 for _ in batch[:-1]])
+
+
+def test_voyage_embedder_raises_locally_on_a_short_response() -> None:
+    # Without this check, a short response silently shifts every subsequent
+    # chunk-vector pairing in the batch, then either surfaces far downstream
+    # as store.upsert's zip(strict=True) ValueError -- pointing a debugger
+    # at the store, not the embedder -- or, if strict zip happens not to
+    # trigger, corrupts data silently. Catch it at the boundary that
+    # actually caused it.
+    embedder = VoyageEmbedder(api_key="voyage-fake")
+    embedder._client = _ShortResponseClient()  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match="embeddings"):
+        embedder.embed(["a", "b", "c"])

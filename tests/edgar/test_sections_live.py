@@ -6,10 +6,10 @@ the assumptions of whoever wrote them.
 """
 
 import os
-from pathlib import Path
 
 import pytest
 
+from era.cli import BOUNDARY_CACHE_DIR, EDGAR_CACHE_DIR
 from era.edgar.boundaries import CachedBoundarySelector, LlmBoundarySelector
 from era.edgar.client import EdgarClient
 from era.edgar.filings import latest_filings, resolve_cik
@@ -23,8 +23,12 @@ pytestmark = pytest.mark.skipif(
     reason="set ERA_LIVE_EDGAR=1 and a contactable EDGAR_USER_AGENT to run this",
 )
 
-CACHE_DIR = Path(".cache/edgar-live")
-BOUNDARY_CACHE_DIR = Path(".cache/boundaries")
+# Imported from era.cli, not redeclared: a real `era ingest` run and this
+# live validation suite must fetch the same filings and make the same
+# boundary decisions against the same on-disk cache, or a literal that
+# silently drifts from era.cli's would re-download or re-decide (i.e.
+# re-spend money on) something a prior run already paid for.
+CACHE_DIR = EDGAR_CACHE_DIR
 
 # A correctly extracted body opens with its own title. Anything else means the
 # parser captured a table-of-contents line or ran past a cross-reference.
