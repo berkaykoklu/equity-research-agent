@@ -1,5 +1,3 @@
-from types import MappingProxyType
-
 import httpx
 import pytest
 import respx
@@ -8,7 +6,7 @@ from tests.fakes import FakeEmbedder, FirstMatchSelector, InMemoryChunkStore
 from era.edgar.client import EdgarClient
 from era.edgar.filings import Filing, MissingFilingError, UnknownTickerError
 from era.index.chunking import DEFAULT_MAX_CHARS
-from era.index.ingest import IngestResult, ingest_ticker
+from era.index.ingest import ingest_ticker
 from era.index.store import StoredChunk
 
 UA = "Berkay Koklu kokluberkay@gmail.com"
@@ -395,6 +393,46 @@ def test_ingest_records_a_per_filing_failure_and_keeps_the_others(
 
 
 @respx.mock
+def test_ingest_prints_the_per_filing_traceback_to_stderr_not_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # ingest_ticker's per-filing except block writes a debug traceback via
+    # traceback.print_exc(file=sys.stderr) -- deliberately not stdout, since
+    # era.cli is the project's stated only module that prints or formats,
+    # and stdout is where a caller's report/parsing lives. Nothing asserted
+    # the destination: swapping file=sys.stderr for file=sys.stdout would
+    # still leave every other test in this module passing, since none of
+    # them inspect either stream. Pin it directly with capsys.
+    import era.index.ingest as ingest_module
+
+    filing_a, filing_b = _two_10k_filings()
+    monkeypatch.setattr(ingest_module, "resolve_cik", lambda client, ticker: CIK)
+    monkeypatch.setattr(ingest_module, "latest_filings", lambda client, cik: [filing_a, filing_b])
+    respx.get(filing_a.primary_document_url).mock(
+        return_value=httpx.Response(200, text=_filing_html(include_item_7=True))
+    )
+    respx.get(filing_b.primary_document_url).mock(
+        return_value=httpx.Response(200, text=_filing_html(include_item_7=True))
+    )
+    store = _RaisesForOneAccession(fail_accession=filing_b.accession)
+
+    ingest_ticker(
+        "AAPL",
+        EdgarClient(user_agent=UA, cache_dir=None),
+        FirstMatchSelector(),
+        FakeEmbedder(),
+        store,  # type: ignore[arg-type]
+    )
+
+    captured = capsys.readouterr()
+    assert "simulated store outage" in captured.err
+    assert "Traceback (most recent call last)" in captured.err
+    assert "simulated store outage" not in captured.out
+    assert "Traceback" not in captured.out
+
+
+@respx.mock
 def test_ingest_a_zero_chunk_reingest_keeps_the_previous_runs_rows() -> None:
     # Deliberate, not a bug -- see the comment in ingest_ticker above the
     # `if chunks:` block. store.upsert (and the delete inside it) only ever
@@ -505,18 +543,26 @@ def test_ingest_makes_exactly_one_embed_call_per_filing(
     assert counting_embedder.calls == 2
 
 
+@respx.mock
 def test_ingest_result_items_missing_and_failures_are_immutable() -> None:
     # The comment on IngestResult argues MappingProxyType makes these
-    # fields immutable; nothing verified that claim. frozen=True alone only
-    # stops reassigning result.items_missing itself, not mutating the dict
-    # it points to -- a MappingProxyType-backed field must reject item
-    # assignment too.
-    result = IngestResult(
-        cik=CIK,
-        accessions=(ACCESSION,),
-        chunks_written=1,
-        items_missing=MappingProxyType({}),
-        failures=MappingProxyType({}),
+    # fields immutable; nothing verified that claim against what
+    # ingest_ticker actually returns. A version of this test that builds an
+    # IngestResult by hand with MappingProxyType({}) passed in directly only
+    # proves MappingProxyType's own contract -- it would keep passing even
+    # if `return IngestResult(...)` inside ingest_ticker were mutated to
+    # pass the plain, unwrapped dicts it builds internally. Call
+    # ingest_ticker for real and assert the *returned* object's fields
+    # reject mutation.
+    _mock_edgar(forms=["10-K"], html=_filing_html(include_item_7=False))
+    store = InMemoryChunkStore()
+
+    result = ingest_ticker(
+        "AAPL",
+        EdgarClient(user_agent=UA, cache_dir=None),
+        FirstMatchSelector(),
+        FakeEmbedder(),
+        store,
     )
 
     with pytest.raises(TypeError):

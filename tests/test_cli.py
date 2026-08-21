@@ -248,7 +248,7 @@ def test_ingest_exits_nonzero_when_the_required_10k_contributes_zero_chunks(
     assert "chunks written: 0" in result.output
 
 
-def test_ingest_names_the_failure_instead_of_a_bare_traceback_when_settings_construction_fails(
+def test_ingest_names_the_failure_when_settings_construction_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Settings(), EdgarClient(...), PgVectorStore(...) and
@@ -257,7 +257,7 @@ def test_ingest_names_the_failure_instead_of_a_bare_traceback_when_settings_cons
     # ValidationError right here, before the per-filing try/except inside
     # ingest_ticker ever gets a chance to run. Without a try wrapping this
     # construction, the CliRunner would show a raw traceback (or, outside a
-    # test harness, print one directly), not a message naming what failed.
+    # test harness, print one directly) with no friendly message at all.
     class _ExplodingSettings:
         def __init__(self) -> None:
             raise ValueError("edgar_user_agent\n  Field required")
@@ -267,9 +267,11 @@ def test_ingest_names_the_failure_instead_of_a_bare_traceback_when_settings_cons
     result = runner.invoke(cli.app, ["ingest", "AAPL"])
 
     assert result.exit_code == 1
-    assert "ingest failed" in result.output
-    assert "Field required" in result.output
-    assert "Traceback" not in result.output
+    assert "ingest failed" in result.stderr
+    assert "Field required" in result.stderr
+    # The friendly one-liner must never land on stdout, the stream a report
+    # or a script parsing this command's output would read.
+    assert "ingest failed" not in result.stdout
 
 
 def test_ingest_names_the_failure_when_the_store_cannot_connect(
@@ -287,8 +289,32 @@ def test_ingest_names_the_failure_when_the_store_cannot_connect(
     result = runner.invoke(cli.app, ["ingest", "AAPL"])
 
     assert result.exit_code == 1
-    assert "ingest failed" in result.output
-    assert "connection to server failed" in result.output
-    assert "Traceback" not in result.output
+    assert "ingest failed" in result.stderr
+    assert "connection to server failed" in result.stderr
     # A failure this early must not also print a success-shaped report.
     assert "chunks written" not in result.output
+
+
+def test_ingest_prints_the_construction_failure_traceback_to_stderr_not_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The one-line "ingest failed: ..." message is right for a config typo,
+    # but an unanticipated bug (an AttributeError while constructing
+    # Settings, the selector, the EDGAR client or the store) needs the full
+    # traceback to be locatable -- mirroring ingest_ticker's own per-filing
+    # handler, which already prints one to stderr. Nothing pinned the
+    # destination: swapping file=sys.stderr for file=sys.stdout in the CLI's
+    # except block would still leave every other test in this module
+    # passing, since none of them separate the two streams. This one does.
+    class _ExplodingSettings:
+        def __init__(self) -> None:
+            raise ValueError("edgar_user_agent\n  Field required")
+
+    monkeypatch.setattr(cli, "Settings", _ExplodingSettings)
+
+    result = runner.invoke(cli.app, ["ingest", "AAPL"])
+
+    assert result.exit_code == 1
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "ValueError" in result.stderr
+    assert "Traceback" not in result.stdout

@@ -14,6 +14,8 @@ web request. The deployed application serves only what a deliberate
 `era research` (Task 15) or any other command alongside this one.
 """
 
+import sys
+import traceback
 from pathlib import Path
 
 import typer
@@ -102,9 +104,16 @@ def ingest(ticker: str) -> None:
         # command: bad config (ValidationError, MissingUserAgentError), an
         # unreachable database (psycopg.OperationalError), being offline or
         # SEC being down (httpx errors) before the per-filing loop in
-        # ingest_ticker even starts. Name the exception and its message --
-        # not a full traceback -- and exit non-zero.
+        # ingest_ticker even starts. Name the exception and its message on
+        # one friendly line first -- that's what a config typo needs -- but
+        # also print the full traceback to stderr, mirroring
+        # ingest_ticker's own per-filing handler: an unanticipated bug here
+        # (an AttributeError while constructing Settings, the selector, the
+        # EDGAR client or the store) deserves the same "don't lose it"
+        # treatment during a money-spending run, not just a tidy one-liner
+        # with no way to locate it.
         typer.echo(f"ingest failed: {type(exc).__name__}: {exc}", err=True)
+        traceback.print_exc(file=sys.stderr)
         raise typer.Exit(code=1) from exc
 
     _report(result)
