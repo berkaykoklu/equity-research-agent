@@ -23,6 +23,7 @@ import typer
 from era.config import Settings
 from era.edgar.boundaries import CachedBoundarySelector, LlmBoundarySelector
 from era.edgar.client import EdgarClient
+from era.graph.models import CHEAP_MODEL, build_model
 from era.index.embeddings import VoyageEmbedder
 from era.index.ingest import IngestResult, ingest_ticker
 from era.index.store import PgVectorStore
@@ -80,7 +81,15 @@ def ingest(ticker: str) -> None:
     # of a message naming what failed.
     try:
         settings = Settings()  # type: ignore[call-arg]
-        selector = CachedBoundarySelector(LlmBoundarySelector(), BOUNDARY_CACHE_DIR)
+        # The key is handed over explicitly: it lives in Settings, while the
+        # provider client reads the process environment, and nothing bridges
+        # the two on its own.
+        selector = CachedBoundarySelector(
+            LlmBoundarySelector(
+                build_model(model_name=CHEAP_MODEL, api_key=settings.openai_api_key)
+            ),
+            BOUNDARY_CACHE_DIR,
+        )
 
         with (
             EdgarClient(user_agent=settings.edgar_user_agent, cache_dir=EDGAR_CACHE_DIR) as client,

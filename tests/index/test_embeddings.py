@@ -1,11 +1,18 @@
 import pytest
 
 from era.index.embeddings import (
+    FREE_TIER_REQUESTS_PER_MINUTE,
     MAX_BATCH_SIZE,
     MAX_CHARS_PER_REQUEST,
+    RATE_LIMIT_MAX_ATTEMPTS,
     VoyageEmbedder,
     _batch_texts,
 )
+
+# Tests that are about batching or ordering -- not pacing -- must not inherit
+# the free-tier throttle, or they spend real minutes asleep. Rate limiting has
+# its own tests further down, with an injected clock.
+UNTHROTTLED = {"requests_per_minute": 10_000, "tokens_per_minute": 10_000_000}
 
 
 def test_batch_texts_splits_on_the_document_count_cap() -> None:
@@ -80,7 +87,7 @@ class _FakeEmbedResult:
 
 
 def test_voyage_embedder_sends_one_request_per_batch_and_concatenates_results() -> None:
-    embedder = VoyageEmbedder(api_key="voyage-fake")
+    embedder = VoyageEmbedder(api_key="voyage-fake", **UNTHROTTLED)  # type: ignore[arg-type]
     recording = _RecordingClient()
     embedder._client = recording  # type: ignore[assignment]
     texts = ["x" * 4000] * MAX_BATCH_SIZE
@@ -101,7 +108,7 @@ def test_voyage_embedder_returns_vectors_in_input_order_across_multiple_batches(
     # texts, each producing a distinct vector, make a swapped pairing
     # visible: the returned vectors must match the *input* order, not
     # whatever order the batches happened to be sent in.
-    embedder = VoyageEmbedder(api_key="voyage-fake")
+    embedder = VoyageEmbedder(api_key="voyage-fake", **UNTHROTTLED)  # type: ignore[arg-type]
     embedder._client = _RecordingClient()  # type: ignore[assignment]
     # Distinct lengths, spanning multiple batches (MAX_BATCH_SIZE=128).
     texts = [f"text-{i}-{'x' * i}" for i in range(150)]
@@ -126,8 +133,97 @@ def test_voyage_embedder_raises_locally_on_a_short_response() -> None:
     # at the store, not the embedder -- or, if strict zip happens not to
     # trigger, corrupts data silently. Catch it at the boundary that
     # actually caused it.
-    embedder = VoyageEmbedder(api_key="voyage-fake")
+    embedder = VoyageEmbedder(api_key="voyage-fake", **UNTHROTTLED)  # type: ignore[arg-type]
     embedder._client = _ShortResponseClient()  # type: ignore[assignment]
 
     with pytest.raises(ValueError, match="embeddings"):
         embedder.embed(["a", "b", "c"])
+
+
+# --- free-tier rate limiting -----------------------------------------------
+#
+# Voyage throttles an account with no payment method to 3 requests and 10,000
+# tokens per minute. The first real `era ingest` hit both and wrote nothing.
+# Clock and sleep are injected so these prove the pacing without waiting.
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.t = 0.0
+        self.slept: list[float] = []
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.t += seconds
+
+
+def _embedder(clock: _FakeClock, client: object, **kwargs: object) -> VoyageEmbedder:
+    embedder = VoyageEmbedder(
+        api_key="fake",
+        sleep=clock.sleep,
+        now=clock.now,
+        **kwargs,  # type: ignore[arg-type]
+    )
+    embedder._client = client  # type: ignore[assignment]
+    return embedder
+
+
+def test_batches_are_sized_against_the_per_minute_token_budget() -> None:
+    # A batch built only against the 120k per-request cap is rejected outright
+    # on the free tier, where the minute budget is 10k.
+    clock = _FakeClock()
+    client = _RecordingClient()
+    embedder = _embedder(clock, client)
+
+    # Twelve chunks of 6,000 chars ~= 2,000 estimated tokens each.
+    embedder.embed(["x" * 6_000] * 12)
+
+    assert all(len(batch) <= 5 for batch in client.calls), client.calls
+
+
+def test_requests_are_paced_under_the_per_minute_ceiling() -> None:
+    clock = _FakeClock()
+    client = _RecordingClient()
+    embedder = _embedder(clock, client)
+
+    # Enough data to need more requests than the 3/minute allowance.
+    embedder.embed(["y" * 6_000] * 24)
+
+    assert len(client.calls) > FREE_TIER_REQUESTS_PER_MINUTE
+    assert clock.slept, "no pacing happened at all"
+
+
+def test_a_generous_account_is_not_throttled() -> None:
+    # Raising the limits is a constructor argument, not an edit.
+    clock = _FakeClock()
+    client = _RecordingClient()
+    embedder = _embedder(clock, client, requests_per_minute=2_000, tokens_per_minute=1_000_000)
+
+    embedder.embed(["z" * 6_000] * 12)
+
+    assert clock.slept == []
+
+
+def test_a_rate_limit_error_is_retried_then_surfaces() -> None:
+    from voyageai.error import RateLimitError
+
+    class _AlwaysLimited:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def embed(self, batch: list[str], **_: object) -> object:
+            self.calls += 1
+            raise RateLimitError("slow down")
+
+    clock = _FakeClock()
+    client = _AlwaysLimited()
+    embedder = _embedder(clock, client)
+
+    with pytest.raises(RuntimeError, match="rate limit not cleared"):
+        embedder.embed(["a" * 100])
+
+    assert client.calls == RATE_LIMIT_MAX_ATTEMPTS
+    assert clock.slept, "backoff never slept"

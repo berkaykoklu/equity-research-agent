@@ -27,6 +27,7 @@ runner = CliRunner()
 class _DummySettings:
     edgar_user_agent = "Test Bot test@example.com"
     voyage_api_key = "voyage-fake"
+    openai_api_key = "sk-fake"
     database_url = "postgresql://fake"
 
 
@@ -61,6 +62,11 @@ class _DummyVoyageEmbedder:
 class _DummyLlmSelector:
     """Distinguishable from _DummyCachedSelector so wiring can be asserted."""
 
+    def __init__(self, model: object = None) -> None:
+        # The CLI now builds the chat model itself and injects it, rather than
+        # letting the selector construct one from the ambient environment.
+        self.model = model
+
 
 class _DummyCachedSelector:
     def __init__(self, inner: object, cache_dir: Path) -> None:
@@ -79,6 +85,9 @@ def _no_real_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "VoyageEmbedder", _DummyVoyageEmbedder)
     monkeypatch.setattr(cli, "CachedBoundarySelector", _DummyCachedSelector)
     monkeypatch.setattr(cli, "LlmBoundarySelector", _DummyLlmSelector)
+    # The CLI hands the key from Settings to the provider client; the real
+    # factory would try to construct one, so stub it out.
+    monkeypatch.setattr(cli, "build_model", lambda **_: object())
 
 
 def test_the_app_requires_a_subcommand_rather_than_collapsing_to_bare_arguments() -> None:
