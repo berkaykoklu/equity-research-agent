@@ -1,0 +1,31 @@
+name: evals
+
+# Judged quality, after merge. Deliberately not a pull-request check: these
+# calls cost money and a model's score moves between identical runs, so gating
+# on them would block work for reasons no one can act on. Tier 1 in ci.yml is
+# the gate; this is the trend line.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  judged:
+    runs-on: ubuntu-latest
+    # Never fails the commit. If this job goes red, the note quality is worth
+    # looking at -- it does not mean the change was wrong.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --all-groups --locked
+      - run: uv run python evals/tier2/run_experiment.py
+        env:
+          EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPIK_API_KEY: ${{ secrets.OPIK_API_KEY }}
+          OPIK_WORKSPACE: ${{ secrets.OPIK_WORKSPACE }}
