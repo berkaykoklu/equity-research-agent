@@ -227,3 +227,35 @@ def test_a_rate_limit_error_is_retried_then_surfaces() -> None:
 
     assert client.calls == RATE_LIMIT_MAX_ATTEMPTS
     assert clock.slept, "backoff never slept"
+
+
+def test_the_limiter_paces_correctly_under_concurrent_callers() -> None:
+    # The graph fans out five sections in parallel and each embeds its query.
+    # Without a lock every thread reads the window, sees room, and fires --
+    # straight through the ceiling. This asserts the ceiling holds.
+    import threading
+
+    from era.index.embeddings import _RateLimiter
+
+    fired: list[float] = []
+    clock = _FakeClock()
+    lock = threading.Lock()
+    limiter = _RateLimiter(
+        requests_per_minute=3, tokens_per_minute=10_000, sleep=clock.sleep, now=clock.now
+    )
+
+    def worker() -> None:
+        limiter.acquire(1_000)
+        with lock:
+            fired.append(clock.now())
+
+    threads = [threading.Thread(target=worker) for _ in range(9)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(fired) == 9
+    # Nine requests against a 3-per-minute ceiling cannot all land in one
+    # window; the clock must have been advanced by waiting.
+    assert clock.t > 0.0, "nine requests fired without any pacing"

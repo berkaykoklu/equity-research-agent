@@ -103,7 +103,28 @@ def task(item: dict[str, str]) -> dict[str, str]:
     }
 
 
+def _export_credentials() -> None:
+    """Bridge .env into the process environment for SDKs that read it directly.
+
+    This project loads credentials through `Settings`, but Opik and the OpenAI
+    client both read `os.environ`. Without this, a key sitting correctly in
+    `.env` produces an authentication error from deep inside a library -- a
+    configuration problem wearing someone else's error message. Existing
+    environment variables win, so CI (which sets real ones) is unaffected.
+    """
+    settings = Settings()  # type: ignore[call-arg]
+    for name, value in (
+        ("OPIK_API_KEY", settings.opik_api_key),
+        ("OPIK_WORKSPACE", settings.opik_workspace),
+        ("OPENAI_API_KEY", settings.openai_api_key),
+    ):
+        if value and not os.environ.get(name):
+            os.environ[name] = value
+
+
 def main() -> int:
+    _export_credentials()
+
     import opik
     from opik.evaluation import evaluate
     from opik.evaluation.metrics import AnswerRelevance, ContextPrecision, Hallucination

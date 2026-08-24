@@ -1,3 +1,4 @@
+import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -96,12 +97,26 @@ class _RateLimiter:
         self._sleep = sleep
         self._now = now
         self._window: deque[tuple[float, int]] = deque()
+        # The graph fans out five sections in parallel and each embeds its own
+        # query, so five threads reach this at once. Without the lock they all
+        # read the window, all see room, and all fire -- straight through a
+        # 3-per-minute ceiling. Observed as "rate limit not cleared after 5
+        # attempts" on the first multi-ticker eval run. EdgarClient's throttle
+        # needed exactly this fix for exactly this reason.
+        self._lock = threading.Lock()
 
     def _evict(self, now: float) -> None:
         while self._window and now - self._window[0][0] >= RATE_LIMIT_WINDOW_SECONDS:
             self._window.popleft()
 
     def acquire(self, tokens: int) -> None:
+        # Held across the sleep on purpose. Releasing it to wait would let the
+        # other threads re-check, find the same lack of room, and pile up --
+        # serialising the wait is what keeps the pacing honest under fan-out.
+        with self._lock:
+            self._acquire_locked(tokens)
+
+    def _acquire_locked(self, tokens: int) -> None:
         while True:
             now = self._now()
             self._evict(now)
