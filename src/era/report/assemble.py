@@ -37,7 +37,12 @@ def _citations(claim: Claim) -> str:
     a reader can look the figure up in the filing's own XBRL data.
     """
     refs = [f"{ref.accession}#{ref.chunk_id}" for ref in claim.chunks]
-    refs += [f"{fact.tag} {fact.fiscal_period}" for fact in claim.facts]
+    # The value, not just the tag. Without it the citation is decorative: the
+    # model is told never to write a figure itself, so a note can cite
+    # "Revenues FY2025" in a sentence containing no revenue. Rendering the
+    # number is what makes the numeric guarantee visible to a reader instead of
+    # merely asserted.
+    refs += [f"{fact.tag} {fact.fiscal_period} = {fact.value:,.0f}" for fact in claim.facts]
     return "; ".join(refs)
 
 

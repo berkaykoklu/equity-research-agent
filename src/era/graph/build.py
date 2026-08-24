@@ -146,32 +146,72 @@ def build_research_graph(
 
         return {"sections": produced, "attempts": counts}
 
+    def _keep_only_verified(section: Section, allowed: frozenset[str]) -> Section:
+        """Drop claims the checker still rejects, after retries are spent.
+
+        Without this, exhausting the retry budget *ships the rejected text*:
+        `verify` records a complaint, `should_retry` gives up, and whatever the
+        last attempt produced goes into the note unfiltered. A claim with an
+        unresolvable citation, an unsupported figure, or outright advisory
+        language reaches the reader under the not-investment-advice footer.
+
+        A claim is kept only if nothing about it is a *content* violation.
+        Infrastructure failures are not the claim's fault and must not silently
+        delete it -- but they also cannot certify it, so a section whose checks
+        could not complete is reported unavailable rather than published.
+        """
+        if not section.available:
+            return section
+
+        kept = []
+        rejected: list[str] = []
+        for index, claim in enumerate(section.claims):
+            one = Section(name=section.name, claims=(claim,))
+            violations = verify_section(one, store, facts, accessions=allowed)
+            content = [v for v in violations if v.category == "content"]
+            if content:
+                rejected.append(f"claim {index}: {content[0].kind}")
+                continue
+            if violations:  # infrastructure -- unverifiable, so not publishable
+                rejected.append(f"claim {index}: {violations[0].kind}")
+                continue
+            kept.append(claim)
+
+        if not kept:
+            return Section(
+                name=section.name,
+                available=False,
+                unavailable_reason=(
+                    "no claim passed verification (" + "; ".join(rejected[:3]) + ")"
+                ),
+            )
+        return Section(name=section.name, claims=tuple(kept))
+
     def finalise(state: ResearchState) -> ResearchState:
         latest = _latest_by_section(state.get("sections", []))
-        ordered = tuple(latest[name] for name in SectionName if name in latest)
-        cited = {
-            ref.accession for section in ordered for claim in section.claims for ref in claim.chunks
-        }
-        cited |= {
-            fact.accession
-            for section in ordered
-            for claim in section.claims
-            for fact in claim.facts
-        }
+        # The authoritative set: the filing this note is about, plus wherever
+        # XBRL reports its figures. Deriving it from the note's own citations
+        # instead would make the foreign-accession check vacuous -- every
+        # citation would trivially belong to the set built from those citations.
+        allowed = frozenset(accessions | {state["accession"]})
+
+        verified = tuple(
+            _keep_only_verified(latest[name], allowed) for name in SectionName if name in latest
+        )
 
         note = ResearchNote(
             ticker=state["ticker"],
             cik=state["cik"],
-            sections=ordered,
+            sections=verified,
             coverage=Coverage(
                 # Must describe the sections actually attached -- the schema
                 # rejects a note whose coverage disagrees with its contents.
-                sections_available=sum(1 for section in ordered if section.available),
-                sections_total=len(ordered),
+                sections_available=sum(1 for section in verified if section.available),
+                sections_total=len(verified),
                 metrics_resolved=tuple(sorted(facts.metrics)),
                 metrics_missing=facts.missing,
             ),
-            accessions=tuple(sorted(cited)),
+            accessions=tuple(sorted(allowed)),
         )
         return {"note": note}
 

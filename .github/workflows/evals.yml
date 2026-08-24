@@ -4,9 +4,11 @@ name: evals
 # calls cost money and a model's score moves between identical runs, so gating
 # on them would block work for reasons no one can act on. Tier 1 in ci.yml is
 # the gate; this is the trend line.
+# Manual only. An `on: push` trigger would mean *publishing the repository*
+# spends real money -- three full research runs plus judge calls -- and then
+# does so again on every commit, silently, forever. The module docstring
+# describes this as something you run deliberately; this makes that true.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:

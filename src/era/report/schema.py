@@ -101,7 +101,12 @@ class ResearchNote(BaseModel):
     cik: str = Field(min_length=1)
     sections: tuple[Section, ...]
     coverage: Coverage
-    accessions: tuple[str, ...] = Field(default=())
+    # Required, deliberately no default. An empty tuple is not "unset": the
+    # verifier reads it as "no filing is in scope" and rejects EVERY citation
+    # as foreign -- silently, and phrased as a content violation, so it would
+    # drive the retry loop to exhaustion rather than surfacing as a config
+    # error. Making it required removes the whole class of bug.
+    accessions: tuple[str, ...]
     cost_usd: float = 0.0
     latency_seconds: float = 0.0
 

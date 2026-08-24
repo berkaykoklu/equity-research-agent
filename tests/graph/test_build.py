@@ -133,3 +133,58 @@ def test_unavailable_sections_are_not_retried() -> None:
 
     assert result["complaints"] == {}
     assert model.calls == 0
+
+
+# --- rejected claims must never reach the reader ---------------------------
+#
+# Found by the final review. `verify` recorded complaints and `should_retry`
+# gave up, but `finalise` packaged whatever the last attempt produced -- so
+# exhausting the retry budget SHIPPED the rejected text, under the
+# not-investment-advice footer, with exit code 0.
+
+BAD_CLAIM = (
+    "We recommend investors buy the shares; our price target implies the company "
+    "closed 4,200 stores and earned 12,345,678,901 dollars."
+)
+
+
+def test_a_claim_that_never_passes_verification_is_not_published() -> None:
+    from era.report.assemble import render_markdown
+    from era.verify.checks import verify_note
+
+    model = ScriptedModel({"claims": [_claim(BAD_CLAIM)]})
+
+    result = _run(model, _store(), max_retries=2)
+    note = result["note"]
+
+    # It was tried and rejected, repeatedly.
+    assert result["complaints"], "the checker should have objected"
+    # And none of it reached the note.
+    assert verify_note(note, _store(), FACTS) == []
+    rendered = render_markdown(note)
+    assert "we recommend" not in rendered.lower()
+    assert "4,200 stores" not in rendered
+    # The gap is reported rather than hidden.
+    assert note.coverage.sections_available == 0
+    assert all(
+        "no claim passed verification" in (s.unavailable_reason or "") for s in note.sections
+    )
+
+
+def test_a_good_claim_still_survives_finalisation() -> None:
+    # The filter must not be so blunt that it eats valid work.
+    model = ScriptedModel({"claims": [_claim(SUPPORTED)]})
+
+    note = _run(model, _store())["note"]
+
+    assert note.coverage.sections_available == len(SectionName)
+    assert all(section.claims for section in note.sections)
+
+
+def test_the_note_carries_the_authoritative_accession_set() -> None:
+    # Deriving `accessions` from the note's own citations would make the
+    # foreign-accession check vacuous: every citation trivially belongs to a
+    # set built from those citations.
+    note = _run(ScriptedModel({"claims": [_claim(SUPPORTED)]}), _store())["note"]
+
+    assert ACC in note.accessions

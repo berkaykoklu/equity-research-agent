@@ -113,7 +113,13 @@ def test_a_fact_citation_names_its_tag_and_period() -> None:
         accessions=(ACCESSION,),
     )
 
-    assert "Revenues FY2024" in render_markdown(note)
+    rendered = render_markdown(note)
+
+    assert "Revenues FY2024" in rendered
+    # The figure itself, not just the tag. The model is forbidden from writing
+    # numbers, so without this a note can cite a revenue tag in a sentence that
+    # never states revenue -- a decorative citation.
+    assert "391,035,000,000" in rendered
 
 
 def test_renders_a_note_whose_every_section_is_unavailable() -> None:
@@ -130,6 +136,10 @@ def test_renders_a_note_whose_every_section_is_unavailable() -> None:
             ),
         ),
         coverage=Coverage(sections_available=0, sections_total=1),
+        # Explicit, not omitted: nothing was parsed, so no filing is in scope.
+        # The schema requires this to be stated rather than defaulted, because
+        # an empty set silently rejects every citation.
+        accessions=(),
     )
 
     out = render_markdown(note)

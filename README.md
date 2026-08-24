@@ -13,21 +13,21 @@ the same code gates every change to this repository.
 ## A real claim, from a real run
 
 ```
-Macroeconomic and geopolitical exposure is material because Apple operates
-internationally, generates a majority of sales outside the U.S., and relies on
-a large, complex global supply chain whose supplier facilities and
-manufacturing and assembly sites are predominantly outside the U.S. …
-[0000320193-25-000079#5; RevenueFromContractWithCustomerExcludingAssessedTax FY2025]
+Macroeconomic and international exposure remains a material risk. Apple states
+that sales outside the U.S. account for a majority of net sales and that much
+of its complex supply chain is overseas. …
+[0000320193-25-000079#5; RevenueFromContractWithCustomerExcludingAssessedTax FY2025 = 416,161,000,000]
 ```
 
-That citation is checkable. `0000320193-25-000079` is Apple's FY2025 10-K,
-`#5` is a specific indexed passage of it, and
-`RevenueFromContractWithCustomerExcludingAssessedTax FY2025` is the exact XBRL
-tag and period the revenue figure was read from. The full note is in
+Every part of that citation is checkable. `0000320193-25-000079` is Apple's
+FY2025 10-K; `#5` is a specific indexed passage of it; and the figure is
+rendered beside the exact XBRL tag and period it was read from, so a reader can
+look it up in the company's own filed data rather than take it on trust. The
+model never typed that number. The full note is in
 [`evals/fixtures/note_aapl.md`](evals/fixtures/note_aapl.md).
 
-**Measured, not estimated.** That note reports `Run cost $0.1024 · 82.6s` for
-five sections; a second run came in at `$0.0974 · 85.5s`. The figures are read
+**Measured, not estimated.** That note reports `Run cost $0.0922 · 81.4s` for
+five sections; other runs came in at `$0.0974` and `$0.1024`. The figures are read
 from the provider's own token counts at each model's own rates, not copied from
 a pricing page — an earlier estimate of $0.13 was a third too high, which is the
 whole argument for measuring.
@@ -91,8 +91,11 @@ So boundary selection is a judgment call, and judgment is what models are for:
   chapter is reported missing, never guessed.
 - The decision is **cached per filing**, which restores determinism.
 
-Measured across 20 real filings: **zero wrong chapters**, 16 of 20 yielding all
-three. See [`docs/parser-validation.md`](docs/parser-validation.md).
+Measured against real filings: 20 tickers attempted, 19 resolved to a fetchable
+10-K (XOM now points at a holding company that has never filed one), and of
+those 19, **15 yielded all three chapters with zero wrong content**. The other
+four are reported missing, which is the correct answer for them. See
+[`docs/parser-validation.md`](docs/parser-validation.md).
 
 ### The checker
 
@@ -103,7 +106,9 @@ flowchart LR
     Q1 --> V["Plain code"]
     Q2 --> V
     V -->|"both pass"| OK["Goes into the note"]
-    V -->|"either fails"| NO["Rejected, rewritten<br/>at most twice"]
+    V -->|"either fails"| NO["Rewritten,<br/>at most twice"]
+    NO --> V
+    NO -->|"still failing"| D["Dropped.<br/>The section says so"]
 ```
 
 No model judges another model here. Because claims carry their sources as typed
@@ -129,6 +134,12 @@ The design bias throughout is that **a visible gap beats a confident guess.**
   that, naming the entity — `XOM` currently does.
 - A claim whose citation does not resolve is rejected and regenerated, at most
   twice. Unbounded retry loops are how agents quietly spend a lot of money.
+- **A claim still failing after those retries is dropped, not published.** If a
+  section has nothing left, it is marked unavailable and says why. The final
+  review of this repo found the opposite behaviour — exhausting the retry budget
+  shipped the rejected text, under the not-investment-advice footer — which is
+  the single worst failure this design can have, so it now has a test that
+  reproduces the exact sentence and asserts it never reaches the reader.
 
 ## Measured quality
 
@@ -199,7 +210,7 @@ against.
 ## Development
 
 ```bash
-uv run pytest          # 270 tests, offline, no API keys required
+uv run pytest          # 279 tests, offline, no API keys required
 uv run ruff check .
 uv run mypy src
 ```
