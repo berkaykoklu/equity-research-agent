@@ -1,0 +1,724 @@
+{
+  "ticker": "AAPL",
+  "cik": "0000320193",
+  "sections": [
+    {
+      "name": "business_overview",
+      "claims": [
+        {
+          "text": "Apple designs, manufactures and markets smartphones, personal computers, tablets, wearables and accessories, while also selling related services. Its product portfolio is organized around iPhone, Mac, iPad, Wearables, Home and Accessories. The iPhone family runs iOS; Macs run macOS; iPads run iPadOS; and the broader device lineup incorporates platform-specific operating systems including watchOS, visionOS and tvOS. This combination of hardware, operating systems, applications and related services underpins the company’s product architecture. In FY2025, the company reported revenue, operating income, net income and operating cash flow, providing the financial scale associated with this broad hardware-and-services business.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 0
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "The company’s device portfolio spans several major consumer-electronics categories. iPhone is its smartphone line, while Mac includes notebook and desktop computers, and iPad comprises multipurpose tablets. Wearables include Apple Watch, wireless headphones and the Apple Vision Pro spatial computer. The Home category includes Apple TV 4K and HomePod products, while Accessories includes Apple-branded and third-party offerings. Apple states that it designs and develops nearly the entire solution for its products, including hardware, operating systems, numerous software applications and related services. This vertically integrated approach is presented as relevant to competition alongside product quality, reliability, design, security, innovation and ecosystem strength.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 0
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 1
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Services extend the company’s offering beyond device sales across advertising, support, cloud, digital content and payments. Advertising includes third-party licensing arrangements and Apple-operated advertising platforms. AppleCare provides fee-based support and service products, including technical support, repair and replacement access and, in many cases, additional coverage for accidental damage, theft or loss. Cloud services store and synchronize customer content across Apple devices and Windows PCs. Digital-content platforms include the App Store and subscription offerings such as Apple Arcade, Fitness+, Music, News+ and TV. Payment services include Apple Card and Apple Pay. The company sells services through its service platforms in the same markets in which it sells products.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 0
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 1
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Apple manages the business primarily by geography rather than by product segment. Its reportable segments are the Americas, Europe, Greater China, Japan and Rest of Asia Pacific; the company says these regions offer similar hardware, software and services but are managed separately to align with customer and distribution-partner locations and regional market dynamics. Its customers span consumer, small and mid-sized business, education, enterprise and government markets. Distribution combines direct channels—retail stores, online stores and a direct sales force—with indirect channels such as cellular carriers and other resellers. During 2025, indirect channels accounted for the larger share of net sales, while direct channels represented the balance.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 0
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 1
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "The company operates in highly competitive markets characterized by aggressive pricing, pressure on gross margins, rapid product introductions, short life cycles, evolving standards and fast technological adoption. Apple identifies price, features, relative price and performance, security, quality, reliability, innovation, third-party software and accessories ecosystems, marketing, distribution, service, support, reputation and intellectual-property protection as important competitive factors. It also states that it holds a minority share of the global smartphone, personal-computer, tablet and wearables markets. Competition includes companies with substantial technical, marketing and distribution resources, broad product lines, low-priced offerings and large installed bases; some competitors can offer products or services at little or no profit or at a loss.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 1
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 2
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Supply-chain execution and continued innovation are material operating considerations. While most essential components are generally available from multiple sources, Apple obtains certain components from single or limited sources and uses some custom components that may be available from only one supplier, particularly in new products. Industry shortages, commodity-price fluctuations, international-trade restrictions, initial capacity constraints and supplier concentration can affect availability or cost. Apple states that successful competition depends heavily on a continual and timely flow of products, services and technologies, supported through R&D, intellectual-property licensing and acquisitions of third-party businesses and technology. It maintains a broad portfolio of patents, designs, copyrights, trademarks and trade secrets, while emphasizing the innovative skills, technical competence and marketing abilities of its personnel.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 2
+            }
+          ],
+          "facts": [
+            {
+              "tag": "Assets",
+              "fiscal_period": "FY2025",
+              "value": 359241000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "LongTermDebtNoncurrent",
+              "fiscal_period": "FY2025",
+              "value": 78328000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        }
+      ],
+      "available": true,
+      "unavailable_reason": null
+    },
+    {
+      "name": "financial_health",
+      "claims": [
+        {
+          "text": "Apple’s FY2025 earnings profile was supported by substantial scale: revenue, operating income and net income are reflected in the filing-derived metrics. The operating result also sits against a reported expansion in total gross-margin percentage versus FY2024, driven by higher Services gross margin and an increase in product gross margin dollars. Services benefited from higher sales and a more favorable mix, while product gross-margin percentage declined because of mix and tariff costs despite other favorable costs. This mix of stronger Services economics and product-cost pressure is important to assessing the durability of operating profitability.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Cash generation remains a central financial-health strength. FY2025 operating cash flow is captured in the filing-derived metric, and management states that cash, cash equivalents and marketable securities, together with cash generated from operations and access to debt markets, are expected to cover cash requirements and the capital-return program over the next 12 months and beyond. That statement is management’s liquidity assessment rather than a guarantee, but it indicates that the company views internally generated cash and financing access as adequate for its stated needs.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 26
+            }
+          ],
+          "facts": [
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "The balance sheet combines a large asset base with meaningful debt obligations. Total assets and total debt are shown in the filing-derived metrics; separately, the company disclosed outstanding fixed-rate notes with varying maturities, commercial paper due within a year, and associated future interest payments. The disclosed debt structure therefore creates scheduled principal and interest demands, although management cites cash balances, ongoing operating cash flow and debt-market access as resources available to meet requirements. Fixed lease-payment obligations for equipment and facilities add another contractual call on liquidity.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 26
+            }
+          ],
+          "facts": [
+            {
+              "tag": "Assets",
+              "fiscal_period": "FY2025",
+              "value": 359241000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "LongTermDebtNoncurrent",
+              "fiscal_period": "FY2025",
+              "value": 78328000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Expense growth did not eliminate operating leverage in FY2025, but it remains a relevant cost consideration. Management reported that both research and development and selling, general and administrative expense increased year over year, with R&D growth attributed primarily to headcount-related and infrastructure-related costs and SG&A growth attributed to headcount-related and variable selling expenses. The company’s operating income metric nevertheless indicates that the business generated a substantial operating profit. Future profitability may depend in part on whether revenue and gross-margin mix can continue to absorb personnel, infrastructure and selling-cost growth.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 26
+            }
+          ],
+          "facts": [
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Revenue diversification provided support across several geographies and categories, while exposing uneven demand trends. Management described year-over-year sales growth in the Americas, Europe, Japan and Rest of Asia Pacific, but a decline in Greater China, primarily from lower iPhone sales. At the category level, Services, Mac and iPad sales increased, while Wearables, Home and Accessories declined; Services growth was attributed to advertising, the App Store and cloud services. The revenue metric reflects the aggregate result, but the regional and product trends show that growth was not uniform.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Financial health remains exposed to external and judgment-related risks identified by management. New and potentially changing tariffs and retaliatory measures may adversely affect supply chains, component availability, pricing, gross margin and consumer demand; management characterizes the ultimate impact as uncertain. It also cautions that gross margins generally face volatility and downward pressure. In addition, uncertain tax positions and legal proceedings require significant judgment, and resolutions inconsistent with management expectations could materially affect financial condition and operating results. These risks could affect the conversion of revenue and operating income into future net income and cash flow.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 24
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 28
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        }
+      ],
+      "available": true,
+      "unavailable_reason": null
+    },
+    {
+      "name": "risk_factors",
+      "claims": [
+        {
+          "text": "Macroeconomic and geopolitical exposure is material because Apple operates internationally, generates a majority of sales outside the U.S., and relies on a large, complex global supply chain whose supplier facilities and manufacturing and assembly sites are predominantly outside the U.S. Slow growth, recession, inflation, tighter credit, higher interest rates and currency movements can weaken consumer confidence and demand. Political events, trade disputes, geopolitical tensions, conflict, natural disasters, public-health issues and other interruptions may also affect Apple and its suppliers, manufacturers, logistics providers and channel partners. At the current revenue base, demand or fulfillment disruptions could have a meaningful effect on operating performance.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 5
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Supply-chain concentration and limited sourcing create risks to product availability, component costs and margins. Apple states that a significant majority of its manufacturing is conducted, in whole or in part, by outsourcing partners, primarily across China mainland, India, Japan, South Korea, Taiwan and Vietnam; final assembly of substantially all hardware products is handled principally by Asian partners. The company also relies on single-source partners for many components and manufacturing activities. This structure lowers operating costs but reduces direct control over production and distribution, potentially impairing product cost, quality, quantity or responsiveness to changing conditions. A disruption at a key partner or region could therefore affect a business operating at Apple’s reported revenue scale.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 9
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Component shortages, supplier concentration and commodity-price volatility could constrain launches and pressure profitability. Apple obtains certain components from single or limited sources, while even multi-sourced components can face industry-wide shortages and substantial price changes. New products may use custom components available from only one supplier, and new technologies can initially face capacity limits until supplier yields improve or manufacturing capacity expands. Suppliers may fail, consolidate, decline to renew supply agreements, or prioritize common rather than customized components. Apple cautions that it may be unable to secure adequate quantities on commercially reasonable terms or identify substitutes promptly. These risks are particularly important when new-product availability and demand must be managed against inventory and purchase commitments.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 10
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 9
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Product-transition execution remains a recurring risk in volatile and competitive markets. Apple must introduce and upgrade products, services and technologies frequently, stimulate demand, meet global regulatory and market-access requirements, and manage transitions without misaligning inventory, manufacturing commitments or product availability. Successful introductions depend on skilled personnel, timely development, customer acceptance, production ramp execution, third-party technology and software support, and availability at expected costs. Quality deficiencies may further impair acceptance. Importantly, new offerings can replace existing products while generating lower revenue or lower profit margins. Failure in these interdependent steps could adversely affect results, even though Apple currently reports substantial operating income and operating cash flow.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 9
+            }
+          ],
+          "facts": [
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Hardware and service quality issues can create direct costs and reputational damage. Apple’s complex hardware, operating systems, applications and services may experience design or manufacturing defects, software issues, outages, slowdowns or errors. Defects in third-party components can make products unsafe and create risks of property damage, environmental damage or personal injury; the company notes that these risks may rise as products enter specialized applications such as health. Although supplier agreements can provide for reimbursement of certain defect expenses, Apple generally remains responsible to consumers for warranty and out-of-warranty service and has experienced unanticipated defect liabilities. Service failures or product defects that do not meet customer expectations could impair market acceptance and financial results.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 10
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 9
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Legal, regulatory and intellectual-property matters present potentially significant but inherently uncertain financial and operational exposure. Apple faces claims, legal proceedings and government investigations, and says the number and alleged magnitude of such matters have generally risen over time. Patent claims involving standards-enabled products are significant, and emerging technologies, including machine learning and artificial intelligence, may exacerbate novel intellectual-property claims. Defending matters can be expensive, disruptive and time-consuming; settlements or other resolutions may reduce revenue, increase cost of sales and operating expenses, require changes to business practices, or limit certain offerings. Outcomes above management expectations could materially affect a reporting period’s results and financial condition, notwithstanding Apple’s reported net income and asset base.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 16
+            }
+          ],
+          "facts": [
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "Assets",
+              "fiscal_period": "FY2025",
+              "value": 359241000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        }
+      ],
+      "available": true,
+      "unavailable_reason": null
+    },
+    {
+      "name": "recent_developments",
+      "claims": [
+        {
+          "text": "Fiscal 2025 operating performance reflected broad, but uneven, growth. Total net sales increased year over year, led by gains in the Americas, Europe, Japan and Rest of Asia Pacific, while Greater China declined. Management attributed the Americas increase principally to iPhone and Services, Europe’s increase to Services, iPhone and Mac, and the Greater China decline primarily to lower iPhone sales, partly offset by Mac. The annual financial facts also show FY2025 revenue, operating income, net income and operating cash flow, providing the reported scale of the year’s sales, profitability and cash generation.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "The product mix continued to shift toward Services. Services was the fastest-growing reported category in fiscal 2025, with management citing advertising, the App Store and cloud services as the principal contributors. iPhone sales also increased, driven by Pro models, while Mac and iPad advanced on stronger laptops and desktops and selected iPad models, respectively. In contrast, Wearables, Home and Accessories declined, which management attributed to lower Accessories and Wearables sales. This category mix is relevant to profitability because Services gross-margin percentage increased, whereas Products gross-margin percentage decreased amid mix effects and tariff costs.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Apple’s fiscal-2025 launch calendar included refreshes across major hardware categories and operating systems. Early in the year, announced products included MacBook Pro, Mac mini, iMac and iPad mini; subsequent announcements included iPhone 16e, iPad Air, iPad, MacBook Air and Mac Studio. Later announcements covered the next-generation operating systems and the iPhone 17 family, Apple Watch updates and AirPods Pro 3. These disclosures establish the cadence of announced offerings, but do not quantify their standalone revenue contribution or commercial uptake.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 24
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Trade policy became a more explicit operating risk during the year. Apple disclosed that new U.S. tariffs were announced beginning in the second quarter of fiscal 2025, covering imports from multiple jurisdictions, with further modifications possible. The company said tariffs and related measures applied to its products or components could materially affect supply chains, raw-material and component availability, pricing and gross margin; it also noted that trade disputes can weaken consumer spending and sentiment. Management specifically identified tariff costs as a partial offset to favorable costs and product mix in Products gross margin.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 24
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": []
+        },
+        {
+          "text": "Capital returns remained material alongside contractual commitments. Apple announced a new authorized share-repurchase program in May 2025 and increased its quarterly cash dividend, while noting that the repurchase authorization does not require a minimum amount of shares to be acquired and that dividend increases remain subject to Board declaration. The company also reported significant manufacturing purchase obligations, most due within the following year, underscoring the near-term commitment profile associated with its outsourced manufacturing model. FY2025 operating cash flow and total debt provide the reported context for liquidity generation and leverage.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 27
+            }
+          ],
+          "facts": [
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "LongTermDebtNoncurrent",
+              "fiscal_period": "FY2025",
+              "value": 78328000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Disclosure and accounting requirements are set to expand over the next several years. Apple plans prospective adoption of the income-tax disclosure standard in its fourth fiscal quarter of 2026, requiring more detail in the tax-rate reconciliation and disaggregation of taxes paid. It also expects prospective adoption of expense-disaggregation disclosures in its fourth fiscal quarter of 2028, including specified cost components within certain income-statement captions and its definition of selling expenses. A separate internal-use-software standard is effective in the first fiscal quarter of 2029; Apple said it is evaluating the timing and method of adoption. These are disclosure and accounting changes rather than stated operating forecasts.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 27
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 28
+            }
+          ],
+          "facts": []
+        }
+      ],
+      "available": true,
+      "unavailable_reason": null
+    },
+    {
+      "name": "valuation_context",
+      "claims": [
+        {
+          "text": "FY2025 valuation context begins with a large reported earnings and cash-generation base: revenue, operating income, net income and operating cash flow are all reported for the year. The relationship among these measures is relevant because it grounds any assessment of earnings capacity in both operating profitability and cash generated from operations, rather than in sales alone. Total assets and total debt provide additional balance-sheet context for evaluating the scale of the operating platform and financial obligations. The filing’s regional sales table also reports that total net sales increased year over year in 2025, supporting a backdrop of consolidated top-line growth.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "Assets",
+              "fiscal_period": "FY2025",
+              "value": 359241000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "LongTermDebtNoncurrent",
+              "fiscal_period": "FY2025",
+              "value": 78328000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Business mix is an important qualitative consideration. In fiscal 2025, Services was the fastest-growing reported sales category, while iPhone sales also increased; Mac and iPad grew, whereas Wearables, Home and Accessories declined. The filing attributes Services growth to advertising, the App Store and cloud services. It also reports that Services generated a materially higher gross-margin percentage than Products and that the Services margin increased year over year. Accordingly, the pace and composition of Services growth can influence consolidated margin context, while product-category performance remains relevant to the broader revenue base.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Geographic trends were uneven despite consolidated sales growth. The Americas, Europe, Japan and Rest of Asia Pacific each recorded higher net sales in 2025, with the filing citing iPhone and/or Services as important contributors across those regions. By contrast, Greater China sales declined, primarily because of lower iPhone sales, partly offset by higher Mac sales. This divergence matters for valuation context because consolidated growth did not reflect uniform demand across regions, and the outlook for regional mix may affect the sources of future sales growth and operating performance.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Cash deployment is a further consideration alongside operating cash generation. The company reports an authorized share-repurchase program that does not require a minimum level of repurchases, an intention to increase its dividend annually subject to board declaration, and a new repurchase authorization announced in May 2025. The filing also states that it repurchased common stock and paid dividends during fiscal 2025. These actions occurred alongside reported operating cash flow, total debt and significant contractual requirements, including manufacturing purchase obligations, lease obligations and other purchase obligations. The authorization and dividend intention are not contractual commitments, however, and remain subject to the stated conditions.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 27
+            }
+          ],
+          "facts": [
+            {
+              "tag": "NetCashProvidedByUsedInOperatingActivities",
+              "fiscal_period": "FY2025",
+              "value": 111482000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "LongTermDebtNoncurrent",
+              "fiscal_period": "FY2025",
+              "value": 78328000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Margin and earnings assumptions should incorporate trade-policy exposure. Apple states that new U.S. tariffs were announced beginning in the second quarter of 2025 and that further changes, including possible sector-based measures, could occur. The company specifically identifies potential adverse effects on its supply chain, component availability, pricing and gross margin; it also says the ultimate impact is uncertain. Its 2025 product gross-margin percentage declined year over year, with product mix and tariff costs cited as contributors, although favorable costs partly offset those factors. Trade disputes may also weaken consumer spending and sentiment, adding uncertainty to demand as well as cost assumptions.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 24
+            },
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 25
+            }
+          ],
+          "facts": [
+            {
+              "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+              "fiscal_period": "FY2025",
+              "value": 416161000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        },
+        {
+          "text": "Reported financial outcomes also depend on judgments and contingencies that can affect valuation interpretation. Management says preparation of its financial statements requires estimates and assumptions affecting reported asset and liability amounts. It highlights significant judgment in uncertain tax positions across U.S. and foreign jurisdictions and cautions that outcomes inconsistent with its expectations could materially affect financial condition and operating results. The company similarly notes that legal proceedings are inherently uncertain and that loss accruals require judgments about probability and estimability. Forthcoming accounting-disclosure standards may improve expense and tax-detail transparency over time, but they do not remove the underlying tax, legal or estimation uncertainty.",
+          "chunks": [
+            {
+              "accession": "0000320193-25-000079",
+              "chunk_id": 28
+            }
+          ],
+          "facts": [
+            {
+              "tag": "Assets",
+              "fiscal_period": "FY2025",
+              "value": 359241000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "OperatingIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 133050000000.0,
+              "accession": "0000320193-25-000079"
+            },
+            {
+              "tag": "NetIncomeLoss",
+              "fiscal_period": "FY2025",
+              "value": 112010000000.0,
+              "accession": "0000320193-25-000079"
+            }
+          ]
+        }
+      ],
+      "available": true,
+      "unavailable_reason": null
+    }
+  ],
+  "coverage": {
+    "sections_available": 5,
+    "sections_total": 5,
+    "metrics_resolved": [
+      "net_income",
+      "operating_cash_flow",
+      "operating_income",
+      "revenue",
+      "total_assets",
+      "total_debt"
+    ],
+    "metrics_missing": []
+  },
+  "accessions": [
+    "0000320193-25-000079"
+  ],
+  "cost_usd": 0.102394,
+  "latency_seconds": 82.64427708298899
+}

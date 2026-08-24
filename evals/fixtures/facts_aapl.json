@@ -1,0 +1,41 @@
+{
+  "metrics": {
+    "revenue": {
+      "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "fiscal_period": "FY2025",
+      "value": 416161000000.0,
+      "accession": "0000320193-25-000079"
+    },
+    "net_income": {
+      "tag": "NetIncomeLoss",
+      "fiscal_period": "FY2025",
+      "value": 112010000000.0,
+      "accession": "0000320193-25-000079"
+    },
+    "operating_income": {
+      "tag": "OperatingIncomeLoss",
+      "fiscal_period": "FY2025",
+      "value": 133050000000.0,
+      "accession": "0000320193-25-000079"
+    },
+    "total_assets": {
+      "tag": "Assets",
+      "fiscal_period": "FY2025",
+      "value": 359241000000.0,
+      "accession": "0000320193-25-000079"
+    },
+    "total_debt": {
+      "tag": "LongTermDebtNoncurrent",
+      "fiscal_period": "FY2025",
+      "value": 78328000000.0,
+      "accession": "0000320193-25-000079"
+    },
+    "operating_cash_flow": {
+      "tag": "NetCashProvidedByUsedInOperatingActivities",
+      "fiscal_period": "FY2025",
+      "value": 111482000000.0,
+      "accession": "0000320193-25-000079"
+    }
+  },
+  "missing": []
+}
