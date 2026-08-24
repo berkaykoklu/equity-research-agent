@@ -134,3 +134,68 @@ def ingest(ticker: str) -> None:
     # silent no-op here is worse than a loud one.
     if result.failures or result.chunks_written == 0:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def research(ticker: str) -> None:
+    """Write a cited research note for an already-indexed company.
+
+    Reads only what `era ingest` has already stored. Nothing here fetches or
+    embeds a filing: retrieval is a database query, so a company that was never
+    ingested reports that plainly rather than quietly indexing itself.
+    """
+    from era.edgar.filings import latest_filings, resolve_cik
+    from era.edgar.xbrl import normalize_facts
+    from era.graph.build import build_research_graph
+    from era.graph.models import DRAFTING_MODEL
+    from era.observability.tracing import measured
+    from era.report.assemble import render_markdown
+    from era.report.schema import revalidated
+
+    try:
+        settings = Settings()  # type: ignore[call-arg]
+        with (
+            EdgarClient(user_agent=settings.edgar_user_agent, cache_dir=EDGAR_CACHE_DIR) as client,
+            PgVectorStore(dsn=settings.database_url) as store,
+        ):
+            cik = resolve_cik(client, ticker)
+            annual = next(f for f in latest_filings(client, cik) if f.form == "10-K")
+            facts = normalize_facts(
+                client.get_json(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json")
+            )
+            graph = build_research_graph(
+                build_model(model_name=DRAFTING_MODEL, api_key=settings.openai_api_key),
+                store,
+                VoyageEmbedder(api_key=settings.voyage_api_key),
+                facts,
+            )
+            with measured(ticker.upper()) as (record, callbacks):
+                result = graph.invoke(
+                    {
+                        "ticker": ticker.upper(),
+                        "cik": cik,
+                        "accession": annual.accession,
+                    },
+                    config={"callbacks": callbacks},
+                )
+    except LookupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        typer.echo(f"research failed: {type(exc).__name__}: {exc}", err=True)
+        traceback.print_exc(file=sys.stderr)
+        raise typer.Exit(code=1) from exc
+
+    # revalidated, not model_copy: model_copy skips the schema's validators,
+    # and the coverage-vs-sections invariant is the note's honesty metric.
+    note = revalidated(
+        result["note"],
+        cost_usd=record.cost_usd,
+        latency_seconds=record.latency_seconds,
+    )
+    typer.echo(render_markdown(note))
+
+    if note.coverage.sections_available == 0:
+        # Every section failed. The note still renders and says so, but this is
+        # not a success and must not exit as though it were.
+        raise typer.Exit(code=1)
