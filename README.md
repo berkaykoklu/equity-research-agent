@@ -130,6 +130,43 @@ The design bias throughout is that **a visible gap beats a confident guess.**
 - A claim whose citation does not resolve is rejected and regenerated, at most
   twice. Unbounded retry loops are how agents quietly spend a lot of money.
 
+## Measured quality
+
+Two tiers of test, and **only one of them gates a merge**.
+
+**Tier 1** ([`evals/tier1/`](evals/tier1/)) runs the runtime verifier over a note
+captured from a real run. Deterministic, offline, free — so it blocks every
+change. Proven to bite: an unresolvable citation, advisory language, and an
+invented figure each fail it.
+
+**Tier 2** ([`evals/tier2/`](evals/tier2/)) asks a model whether the notes are
+any *good*, across Apple, Coca-Cola and Johnson & Johnson. It **never** gates a
+merge — a check that fails randomly is one people learn to ignore.
+
+| | hallucination ↓ | answer relevance ↑ |
+|---|---|---|
+| judge sees only filing passages | 0.31 | 0.91 |
+| judge sees the sources claims actually cite | **0.11** | **0.93** |
+
+Both rows are real runs, and the second is the honest one — but the first is
+kept because the difference is the interesting part.
+
+Claims cite two kinds of source: passages from the filing, and exact figures
+from its XBRL data. The first run handed the judge only the passages, so every
+correctly-sourced numeric claim looked unsupported and the score measured a gap
+in the *evidence given to the judge* rather than a gap in the notes.
+
+Changing an eval after disliking its result is how dishonest benchmarks get
+made. What makes this defensible is that the fix is independently correct — a
+judge scoring grounding must see every source a claim cites — and it would have
+been the right change had the first number come back at 0.05.
+
+`ContextPrecision` was dropped rather than reported. It requires an
+`expected_output`, and there is no single correct research note to compare a
+research note against; writing reference notes by hand so a metric has
+something to grade would be inventing a ground truth to score ourselves
+against.
+
 ## Design decisions worth defending
 
 1. **The verifier is code, not a model judging a model.** Citation resolution

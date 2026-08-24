@@ -25,7 +25,7 @@ import sys
 from era.config import Settings
 from era.edgar.client import EdgarClient
 from era.edgar.filings import latest_filings, resolve_cik
-from era.edgar.xbrl import normalize_facts
+from era.edgar.xbrl import facts_card, normalize_facts
 from era.graph.build import build_research_graph
 from era.graph.models import CHEAP_MODEL, DRAFTING_MODEL, build_model
 from era.index.embeddings import VoyageEmbedder
@@ -77,7 +77,13 @@ def _research(ticker: str) -> tuple[str, str]:
         result = graph.invoke({"ticker": ticker, "cik": cik, "accession": annual.accession})
         note = result["note"]
 
-        sources: list[str] = []
+        # The facts card belongs in the judge's context, not just the chunks.
+        # Claims cite two kinds of source: passages from the filing, and exact
+        # figures from its XBRL data. Handing the judge only the passages makes
+        # every correctly-sourced numeric claim look unsupported, and the
+        # hallucination score then measures the gap in the evidence given to
+        # the judge rather than any gap in the note.
+        sources: list[str] = [facts_card(facts)]
         for section in note.sections:
             for claim in section.claims:
                 for ref in claim.chunks:
@@ -127,7 +133,16 @@ def main() -> int:
 
     import opik
     from opik.evaluation import evaluate
-    from opik.evaluation.metrics import AnswerRelevance, ContextPrecision, Hallucination
+
+    # Hallucination and AnswerRelevance score against the input, the output and
+    # the retrieved context -- all of which this task genuinely has.
+    #
+    # ContextPrecision is deliberately absent. It requires an `expected_output`:
+    # a reference answer to measure against. There is no correct research note
+    # to compare a research note to, and writing reference notes by hand so a
+    # metric has something to grade would be inventing a ground truth to score
+    # ourselves against. That is fake rigour, and worse than one metric fewer.
+    from opik.evaluation.metrics import AnswerRelevance, Hallucination
 
     client = opik.Opik()
     dataset = client.get_or_create_dataset(name=DATASET_NAME)
@@ -139,7 +154,6 @@ def main() -> int:
         scoring_metrics=[
             Hallucination(model=JUDGE_MODEL),
             AnswerRelevance(model=JUDGE_MODEL),
-            ContextPrecision(model=JUDGE_MODEL),
         ],
         experiment_name=os.environ.get("GITHUB_SHA", "local")[:12],
     )
