@@ -41,6 +41,24 @@ uv run era ingest AAPL    # fetch, cut into chapters, embed, store
 uv run era research AAPL  # write the note
 ```
 
+### Run the site, with no database and no keys
+
+```bash
+uv run uvicorn scripts.serve_demo:app --port 8000   # serves a stored note
+cd web && npm install && API_BASE_URL=http://127.0.0.1:8000 npm run dev
+```
+
+Then open `http://localhost:3000`. The note it serves is real — generated
+against Apple's FY2025 10-K and checked by the same verifier that gates CI —
+and every citation on the page is a link to the filing on SEC's own site.
+
+**The site cannot generate a note.** Producing one costs money and takes ~80
+seconds, so an endpoint that could generate is an endpoint a stranger can make
+expensive. Notes are written deliberately with `era research TICKER --save`;
+the site only reads. Two tests hold that line: one asserts no route accepts a
+write method, the other imports the API in a subprocess and asserts the
+generation graph never enters memory.
+
 ## How it works
 
 Six things happen. The middle step splits in two because words and numbers need

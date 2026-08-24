@@ -9,6 +9,7 @@ from era.edgar.client import EdgarClient
 from era.edgar.filings import (
     MissingFilingError,
     UnknownTickerError,
+    filing_index_url,
     latest_filings,
     resolve_cik,
 )
@@ -455,3 +456,39 @@ def test_prefers_the_original_10k_over_a_later_amendment() -> None:
 
     assert [f.form for f in filings] == ["10-K"]
     assert filings[0].accession == "0000320193-24-000123"
+
+
+# --- citation links ---------------------------------------------------------
+
+
+def test_a_citation_links_to_the_filing_index_page() -> None:
+    # Apple's FY2025 10-K, the accession cited throughout the README and the
+    # stored AAPL note. Written out in full because the value of this test is
+    # that the string is exactly what SEC serves -- rebuilding the expected URL
+    # from the same pieces the function uses would assert nothing.
+    assert filing_index_url("0000320193", "0000320193-25-000079") == (
+        "https://www.sec.gov/Archives/edgar/data/320193/"
+        "000032019325000079/0000320193-25-000079-index.htm"
+    )
+
+
+def test_the_folder_drops_dashes_but_the_filename_keeps_them() -> None:
+    # The two spellings are not interchangeable: SEC's directory segment is
+    # the bare digits and the index file inside it is the dashed accession.
+    # Getting this backwards yields a 404 that only shows up in a browser.
+    url = filing_index_url("0000019617", "0000019617-25-000260")
+
+    assert "/000001961725000260/" in url
+    assert url.endswith("/0000019617-25-000260-index.htm")
+
+
+def test_a_cik_that_is_already_bare_is_left_alone() -> None:
+    assert "/data/1318605/" in filing_index_url("1318605", "0001318605-25-000045")
+
+
+def test_it_needs_no_client_and_makes_no_request() -> None:
+    # Guarded by respx with no routes registered: any outbound request raises.
+    # This is what lets the API attach a link to every citation without
+    # spending an SEC round-trip per note.
+    with respx.mock(assert_all_called=False):
+        assert filing_index_url("0000320193", "0000320193-25-000079").startswith("https://")

@@ -1,0 +1,17 @@
+.venv/
+node_modules/
+.next/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Nothing the running site reads. The API serves stored notes; the test suite,
+# the eval fixtures and the parser-validation write-up are all build-time or
+# development artefacts.
+tests/
+evals/
+docs/
+scripts/

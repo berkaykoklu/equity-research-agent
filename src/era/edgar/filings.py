@@ -140,6 +140,24 @@ def latest_filings(client: EdgarClient, cik: str) -> list[Filing]:
     return [best_by_form[form] for form in WANTED_FORMS if form in best_by_form]
 
 
+def filing_index_url(cik: str, accession: str) -> str:
+    """Where a reader lands when they click a citation.
+
+    The filing's *index* page, not its primary document. A citation names a
+    filing, and the index lists every document in it — including the XBRL data
+    a fact citation points at, which is not in the primary document at all.
+
+    This takes no network and no client: an accession and a CIK are enough to
+    address a filing, which is what makes the deployed site able to link every
+    citation without a single SEC request. Same two CIK/accession spellings
+    documented in `latest_filings` above.
+    """
+    return (
+        f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/"
+        f"{accession.replace('-', '')}/{accession}-index.htm"
+    )
+
+
 def _missing_filing_message(
     data: dict[str, Any], cik: str, required_form: str, forms: list[Any]
 ) -> str:

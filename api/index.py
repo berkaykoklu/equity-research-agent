@@ -25,6 +25,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from era.edgar.filings import filing_index_url
 from era.index.notes import NoteStore, PgNoteStore, StoredNote
 from era.report.schema import ResearchNote
 
@@ -68,9 +69,20 @@ class NoteSummary(BaseModel):
     sections_total: int
 
 
+class FilingLink(BaseModel):
+    accession: str
+    url: str
+
+
 class NoteDetail(NoteSummary):
     note: ResearchNote
     markdown: str
+    # Resolved here rather than in the browser. A citation is only worth
+    # rendering if it goes somewhere, and the rule for turning an accession
+    # into an SEC URL is the kind of thing that breaks silently -- so it lives
+    # next to the code that knows EDGAR's layout, under the test suite that
+    # gates every change, instead of being re-derived in TypeScript.
+    filings: list[FilingLink]
 
 
 def _summary(row: StoredNote) -> NoteSummary:
@@ -105,4 +117,8 @@ def get_note(ticker: str, store: StoreDep) -> NoteDetail:
         **summary.model_dump(),
         note=row.note,
         markdown=row.markdown,
+        filings=[
+            FilingLink(accession=accession, url=filing_index_url(row.cik, accession))
+            for accession in row.note.accessions
+        ],
     )

@@ -176,3 +176,24 @@ def test_importing_the_api_never_loads_the_graph() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "[]", f"the API pulled in {result.stdout.strip()}"
+
+
+def test_every_accession_a_claim_cites_comes_back_with_a_link() -> None:
+    # The site's whole promise is that a reader can click a claim and land on
+    # the filing. Asserting over the accessions the *claims* carry, rather than
+    # over the note's own list, is what makes this catch a citation that no
+    # link covers -- an unclickable claim is a broken promise, not a cosmetic
+    # gap.
+    body = _client(_stocked()).get("/api/notes/AAPL").json()
+    linked = {row["accession"]: row["url"] for row in body["filings"]}
+
+    cited = {
+        ref["accession"]
+        for section in body["note"]["sections"]
+        for claim in section["claims"]
+        for ref in list(claim["chunks"]) + list(claim["facts"])
+    }
+
+    assert cited, "fixture cites nothing, so this test would pass vacuously"
+    assert cited <= linked.keys()
+    assert linked[ACC].startswith("https://www.sec.gov/Archives/edgar/data/320193/")
