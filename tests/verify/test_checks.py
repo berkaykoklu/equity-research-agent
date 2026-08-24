@@ -891,11 +891,10 @@ def test_the_same_figure_restated_with_different_trailing_zeros_is_one_violation
 
 
 def test_the_planned_report_footer_passes_cleanly() -> None:
-    # Verbatim from the disclaimer text in Task 14's plan
-    # (docs/superpowers/plans/2026-08-10-equity-research-agent-core.md,
-    # render_markdown's closing line) -- src/era/report/assemble.py does not
-    # exist yet in this repo, so this is the exact text it is planned to
-    # produce, pinned here so Task 14 has a regression test to run against.
+    # A disclaimer must not trip the check written to keep the report honest.
+    # This is the wording the footer settled on; the live text lives in
+    # `report.assemble.NOT_ADVICE` and has its own test there. Pinning a copy
+    # here keeps the checker's own contract legible from the checker's tests.
     footer = (
         "This is an automated summary of public filings. It is not investment "
         "advice and contains no recommendation."

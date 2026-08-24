@@ -9,6 +9,9 @@ __pycache__/
 .ruff_cache/
 .cache/
 .superpowers/
+# Internal build plans and specs. Kept locally, not published: they are
+# scaffolding for how the repo was built, not documentation of what it does.
+docs/superpowers/
 .DS_Store
 dist/
 *.egg-info/
