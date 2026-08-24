@@ -93,6 +93,17 @@ async function read<T>(path: string): Promise<T | null> {
     // argue against -- a confident answer covering a gap.
     throw new Error(`GET ${path} failed: ${response.status} ${response.statusText}`);
   }
+
+  // A 200 is not a promise of JSON. When the function behind this route fails
+  // to boot, the platform answers with an HTML error page -- and parsing that
+  // as JSON reports a syntax error at character 1, which says nothing about
+  // what actually went wrong. Checking the type turns that into a message
+  // naming the route and what it returned instead.
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const body = (await response.text()).slice(0, 200);
+    throw new Error(`GET ${path} returned ${contentType || "no content-type"}, not JSON: ${body}`);
+  }
   return (await response.json()) as T;
 }
 

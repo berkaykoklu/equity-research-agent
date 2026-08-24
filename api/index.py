@@ -18,16 +18,25 @@ where the notes live.
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel
+# The serverless build installs the locked dependencies but not this project,
+# so `era` -- which lives under src/ -- is not importable by default and the
+# function dies on first import. Putting src/ on the path is what makes the
+# deployed function see the same package the tests do. A no-op locally, where
+# the project is installed in the environment already.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from era.edgar.filings import filing_index_url
-from era.index.notes import NoteStore, PgNoteStore, StoredNote
-from era.report.schema import ResearchNote
+from fastapi import Depends, FastAPI, HTTPException  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+
+from era.edgar.filings import filing_index_url  # noqa: E402
+from era.index.notes import NoteStore, PgNoteStore, StoredNote  # noqa: E402
+from era.report.schema import ResearchNote  # noqa: E402
 
 app = FastAPI(
     title="equity-research-agent",
