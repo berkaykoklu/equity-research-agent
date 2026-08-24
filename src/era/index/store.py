@@ -1,9 +1,12 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Protocol
+from typing import Any, Protocol, TypeVar
 
 from era.index.chunking import Chunk
 from era.index.embeddings import DIMENSIONS
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -113,12 +116,50 @@ class PgVectorStore:
         # -- which the fake-only test suite does transitively, via
         # StoredChunk -- never requires psycopg or pgvector to be
         # installed. Only constructing a real PgVectorStore does.
+        self._dsn = dsn
+        self._conn = self._connect()
+
+    def _connect(self) -> Any:
         import psycopg
         from pgvector.psycopg import register_vector
 
-        self._conn = psycopg.connect(dsn, autocommit=True, connect_timeout=10)
-        self._conn.execute(SCHEMA)
-        register_vector(self._conn)
+        conn = psycopg.connect(self._dsn, autocommit=True, connect_timeout=10)
+        conn.execute(SCHEMA)
+        register_vector(conn)
+        return conn
+
+    def _with_reconnect(self, operation: Callable[[Any], T]) -> T:
+        """Run an operation, reconnecting once if the server had hung up.
+
+        `psycopg` does not mark a connection closed until something actually
+        fails on it, so checking a flag first is not enough -- the failure is
+        how you find out. One retry: a genuinely unreachable database should
+        surface, not be retried in a loop while a run appears to hang.
+        """
+        import psycopg
+
+        try:
+            return operation(self._live_connection())
+        except psycopg.OperationalError:
+            self._conn = self._connect()
+            return operation(self._conn)
+
+    def _live_connection(self) -> Any:
+        """Reconnect if the server hung up while we were busy elsewhere.
+
+        Neon's free tier suspends a compute after five minutes idle. Ingest
+        holds this connection open while embedding a filing, which on Voyage's
+        free tier takes twenty minutes or more for a large 10-K -- so by the
+        time the chunks are ready to write, the connection is long dead and the
+        write fails with AdminShutdown after all that work.
+
+        Reconnecting here rather than pinging on a timer keeps the cost where
+        it belongs: nothing happens on a healthy connection, and a suspended
+        compute is woken by the query that actually needs it.
+        """
+        if self._conn.closed:
+            self._conn = self._connect()
+        return self._conn
 
     def close(self) -> None:
         self._conn.close()
@@ -157,24 +198,29 @@ class PgVectorStore:
         # between the delete and the inserts can't leave the accession with
         # zero rows.
         accessions = {chunk.accession for chunk in chunks}
-        with self._conn.transaction(), self._conn.cursor() as cur:
-            for accession in accessions:
-                cur.execute("DELETE FROM chunks WHERE accession = %s", (accession,))
-            for chunk, vector in zip(chunks, vectors, strict=True):
-                cur.execute(
-                    """
-                    INSERT INTO chunks (accession, chunk_id, item, start_offset, text, embedding)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        chunk.accession,
-                        chunk.chunk_id,
-                        chunk.item,
-                        chunk.start,
-                        chunk.text,
-                        Vector(vector),
-                    ),
-                )
+
+        def _write(conn: Any) -> None:
+            with conn.transaction(), conn.cursor() as cur:
+                for accession in accessions:
+                    cur.execute("DELETE FROM chunks WHERE accession = %s", (accession,))
+                for chunk, vector in zip(chunks, vectors, strict=True):
+                    cur.execute(
+                        """
+                        INSERT INTO chunks
+                            (accession, chunk_id, item, start_offset, text, embedding)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            chunk.accession,
+                            chunk.chunk_id,
+                            chunk.item,
+                            chunk.start,
+                            chunk.text,
+                            Vector(vector),
+                        ),
+                    )
+
+        self._with_reconnect(_write)
 
     def query(
         self,
@@ -201,23 +247,30 @@ class PgVectorStore:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY embedding <=> %s LIMIT %s"
         params.extend([Vector(vector), k])
-        with self._conn.cursor() as cur:
-            cur.execute(sql, params)
-            return [
-                StoredChunk(accession=r[0], chunk_id=r[1], item=r[2], start=r[3], text=r[4])
-                for r in cur.fetchall()
-            ]
+
+        def _read(conn: Any) -> list[StoredChunk]:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return [
+                    StoredChunk(accession=r[0], chunk_id=r[1], item=r[2], start=r[3], text=r[4])
+                    for r in cur.fetchall()
+                ]
+
+        return self._with_reconnect(_read)
 
     def get(self, accession: str, chunk_id: int) -> StoredChunk | None:
-        with self._conn.cursor() as cur:
-            cur.execute(
-                "SELECT accession, chunk_id, item, start_offset, text FROM chunks "
-                "WHERE accession = %s AND chunk_id = %s",
-                (accession, chunk_id),
+        def _read(conn: Any) -> StoredChunk | None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT accession, chunk_id, item, start_offset, text FROM chunks "
+                    "WHERE accession = %s AND chunk_id = %s",
+                    (accession, chunk_id),
+                )
+                row = cur.fetchone()
+            if row is None:
+                return None
+            return StoredChunk(
+                accession=row[0], chunk_id=row[1], item=row[2], start=row[3], text=row[4]
             )
-            row = cur.fetchone()
-        if row is None:
-            return None
-        return StoredChunk(
-            accession=row[0], chunk_id=row[1], item=row[2], start=row[3], text=row[4]
-        )
+
+        return self._with_reconnect(_read)

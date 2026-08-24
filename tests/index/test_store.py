@@ -2,7 +2,7 @@ import pytest
 from tests.fakes import FakeEmbedder, InMemoryChunkStore
 
 from era.index.chunking import Chunk
-from era.index.store import VectorDimensionError
+from era.index.store import PgVectorStore, VectorDimensionError
 
 
 def test_query_returns_nearest_chunk_first() -> None:
@@ -234,3 +234,72 @@ def test_query_rejects_a_wrong_dimension_vector() -> None:
 
     with pytest.raises(VectorDimensionError):
         store.query([0.0, 1.0], item_filter=None, accession_filter=None, k=1)
+
+
+# --- reconnect after the server hangs up -----------------------------------
+#
+# Neon's free tier suspends a compute after five minutes idle. Ingest holds a
+# connection open while embedding, which on Voyage's free tier takes twenty
+# minutes or more for a large 10-K -- so the write arrives at a dead
+# connection and fails with AdminShutdown after all that work. Found on a real
+# ingest of KO, which embedded the whole filing and then lost every chunk.
+
+
+class _DeadThenLiveConnection:
+    """Fails once the way a suspended Postgres does, then works."""
+
+    def __init__(self, fail_times: int) -> None:
+        self.remaining_failures = fail_times
+        self.closed = False
+        self.executed: list[str] = []
+
+    def execute(self, sql: str, *args: object) -> None:
+        self.executed.append(sql)
+
+    def cursor(self) -> "_DeadThenLiveConnection":
+        return self
+
+    def __enter__(self) -> "_DeadThenLiveConnection":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def fetchone(self) -> None:
+        return None
+
+
+def test_a_dropped_connection_is_reconnected_rather_than_failing_the_write() -> None:
+    import psycopg
+
+    store = PgVectorStore.__new__(PgVectorStore)  # bypass connecting for real
+    store._dsn = "postgresql://unused"
+    attempts: list[int] = []
+
+    live = _DeadThenLiveConnection(fail_times=0)
+    store._conn = live
+    store._connect = lambda: live  # type: ignore[method-assign]
+
+    def operation(conn: object) -> str:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise psycopg.OperationalError("terminating connection due to administrator command")
+        return "written"
+
+    assert store._with_reconnect(operation) == "written"
+    assert len(attempts) == 2, "should have retried exactly once"
+
+
+def test_a_genuinely_unreachable_database_surfaces_rather_than_looping() -> None:
+    import psycopg
+
+    store = PgVectorStore.__new__(PgVectorStore)
+    store._dsn = "postgresql://unused"
+    store._conn = _DeadThenLiveConnection(fail_times=0)
+    store._connect = lambda: _DeadThenLiveConnection(fail_times=0)  # type: ignore[method-assign]
+
+    def always_fails(conn: object) -> str:
+        raise psycopg.OperationalError("connection refused")
+
+    with pytest.raises(psycopg.OperationalError):
+        store._with_reconnect(always_fails)
