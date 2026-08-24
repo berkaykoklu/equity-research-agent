@@ -2,6 +2,10 @@
 
 [![ci](https://github.com/berkaykoklu/equity-research-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/berkaykoklu/equity-research-agent/actions/workflows/ci.yml)
 
+**[Live site →](https://equity-research-agent-one.vercel.app)** — real notes for
+Apple, Coca-Cola and Johnson & Johnson. Click any citation to land on the SEC
+filing it came from.
+
 Type a ticker; get a research note in which **every sentence is traceable to the
 paragraph it came from**, and in which the numbers come from the company's own
 filed data rather than from a language model.
