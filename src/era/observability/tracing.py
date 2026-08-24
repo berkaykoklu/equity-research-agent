@@ -80,9 +80,26 @@ def _cost_across_models(by_model: dict[str, Any]) -> float:
     return total
 
 
+def _opik_tracer(graph: Any) -> Any | None:
+    """An Opik tracer, or None if Opik isn't usable here.
+
+    Tracing is observability, not correctness: a missing key or an unreachable
+    Opik must never stop a run that is otherwise fine. Verified against the real
+    graph — five parallel section nodes, verify, should_retry and finalise all
+    land as named spans under a single trace, so the fan-out needs no special
+    handling.
+    """
+    try:
+        from opik.integrations.langchain import OpikTracer
+
+        return OpikTracer(project_name="equity-research-agent", graph=graph)
+    except Exception:  # noqa: BLE001 -- never fail a run over telemetry
+        return None
+
+
 @contextmanager
-def measured(ticker: str) -> Iterator[tuple[RunRecord, list[Any]]]:
-    """Time a run and collect its token usage.
+def measured(ticker: str, graph: Any = None) -> Iterator[tuple[RunRecord, list[Any]]]:
+    """Time a run, collect its token usage, and trace it if Opik is configured.
 
     Yields the record it will fill in and the callback list to hand to the
     graph. The record is only complete once the block exits.
@@ -90,12 +107,25 @@ def measured(ticker: str) -> Iterator[tuple[RunRecord, list[Any]]]:
     from langchain_core.callbacks import UsageMetadataCallbackHandler
 
     handler = UsageMetadataCallbackHandler()
+    callbacks: list[Any] = [handler]
+
+    tracer = _opik_tracer(graph) if graph is not None else None
+    if tracer is not None:
+        callbacks.append(tracer)
+
     record = RunRecord(ticker=ticker)
     started = time.monotonic()
     try:
-        yield record, [handler]
+        yield record, callbacks
     finally:
         record.latency_seconds = time.monotonic() - started
         by_model = dict(handler.usage_metadata)
         record.tokens = _flatten(by_model)
         record.cost_usd = _cost_across_models(by_model)
+        if tracer is not None:
+            try:
+                tracer.flush()
+                traces = tracer.created_traces()
+                record.trace_id = traces[0].id if traces else None
+            except Exception:  # noqa: BLE001 -- telemetry must not break a run
+                record.trace_id = None

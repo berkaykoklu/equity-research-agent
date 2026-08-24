@@ -169,7 +169,10 @@ def research(ticker: str) -> None:
                 VoyageEmbedder(api_key=settings.voyage_api_key),
                 facts,
             )
-            with measured(ticker.upper()) as (record, callbacks):
+            with measured(ticker.upper(), graph.get_graph(xray=True)) as (
+                record,
+                callbacks,
+            ):
                 result = graph.invoke(
                     {
                         "ticker": ticker.upper(),

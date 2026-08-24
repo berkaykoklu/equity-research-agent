@@ -93,3 +93,48 @@ def test_measured_yields_a_callback_list_for_the_graph() -> None:
 
     assert record.cost_usd == 0.0  # nothing ran, so nothing was spent
     assert record.tokens == {}
+
+
+def test_a_run_without_a_graph_is_untraced_but_still_measured() -> None:
+    # Tracing is optional. Passing no graph must not stop cost and latency
+    # being recorded.
+    with measured("AAPL") as (record, callbacks):
+        pass
+
+    assert record.trace_id is None
+    assert callbacks, "the usage callback must still be present"
+
+
+def test_a_tracer_that_cannot_be_built_returns_none_rather_than_raising(
+    monkeypatch: object,
+) -> None:
+    # Opik unreachable, unconfigured, or raising on construction is an
+    # observability problem, not a reason to fail a run that is otherwise fine.
+    from era.observability import tracing
+
+    def _explode(*_: object, **__: object) -> object:
+        raise RuntimeError("opik is down")
+
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        "opik.integrations.langchain.OpikTracer", _explode
+    )
+
+    assert tracing._opik_tracer(object()) is None
+
+
+def test_a_failed_tracer_still_leaves_the_run_measured(monkeypatch: object) -> None:
+    def _explode(*_: object, **__: object) -> object:
+        raise RuntimeError("opik is down")
+
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        "opik.integrations.langchain.OpikTracer", _explode
+    )
+
+    with measured("AAPL", graph=object()) as (record, callbacks):
+        pass
+
+    # The usage callback survives, so cost and latency are still recorded even
+    # though nothing was traced.
+    assert callbacks
+    assert record.trace_id is None
+    assert record.latency_seconds >= 0.0
