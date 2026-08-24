@@ -12,5 +12,27 @@ jobs:
       - run: uv sync --all-groups --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy src
+      # No path argument: the `files` setting in pyproject covers src and api.
+      # Naming `src` here instead would silently skip the API -- the one module
+      # that runs in production with no test process around it.
+      - run: uv run mypy
       - run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # The build is the check that matters: it type-checks the route handlers
+      # and page props that `tsc` alone does not see, and a site that cannot
+      # build is a site that cannot deploy.
+      - run: npm run build
