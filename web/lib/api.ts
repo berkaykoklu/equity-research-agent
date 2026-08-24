@@ -66,14 +66,25 @@ export type NoteDetail = NoteSummary & {
 /**
  * Where the read API lives.
  *
- * Same origin by default, which is what a single-project deployment gives us.
- * `API_BASE_URL` overrides it for the split-project layout and for local work,
- * where Next runs on 3000 and uvicorn on 8000.
+ * On Vercel this is injected by the service binding declared in vercel.json:
+ * an internal address that skips the public request pipeline entirely. That
+ * matters -- routing through the public URL instead means the call is subject
+ * to Deployment Protection, which answers a server-side fetch with an HTML
+ * login page rather than the JSON it asked for.
+ *
+ * Set it by hand for local work (Next on 3000, uvicorn on 8000) or for a
+ * split-project deployment. Deliberately no fallback when running on Vercel:
+ * a missing binding is a broken deployment, and guessing a URL here would
+ * turn a clear configuration error back into the confusing one above.
  */
 function baseUrl(): string {
   const configured = process.env.API_BASE_URL;
   if (configured) return configured.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  if (process.env.VERCEL) {
+    throw new Error(
+      "API_BASE_URL is unset on Vercel — the `api` service binding in vercel.json did not resolve",
+    );
+  }
   return "http://127.0.0.1:8000";
 }
 
