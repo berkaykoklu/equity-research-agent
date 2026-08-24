@@ -81,7 +81,18 @@ class PgNoteStore:
     def _connect(self) -> Any:
         import psycopg
 
-        conn = psycopg.connect(self._dsn, autocommit=True, connect_timeout=10)
+        conn = psycopg.connect(
+            self._dsn,
+            autocommit=True,
+            connect_timeout=10,
+            # No server-side prepared statements. This store is the one that
+            # runs in a serverless function, where the right connection string
+            # is a pooled one -- and a transaction-mode pooler hands the same
+            # session to different clients, so a statement prepared on one
+            # request may not exist on the next. Costs nothing here: every
+            # query in this class is a single round trip.
+            prepare_threshold=None,
+        )
         conn.execute(SCHEMA)
         return conn
 

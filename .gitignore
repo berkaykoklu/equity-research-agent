@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 .env
 .env.*
-!.env.example
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -15,3 +14,9 @@ docs/superpowers/
 .DS_Store
 dist/
 *.egg-info/
+.vercel
+.env*
+
+# Last, so it survives the broader .env* rule above (which `vercel link` adds).
+# .env.example carries no secrets and is what the quickstart tells you to copy.
+!.env.example
