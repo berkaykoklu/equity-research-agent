@@ -330,3 +330,43 @@ def test_build_model_rejects_an_unknown_provider() -> None:
 
     with pytest.raises(ValueError, match="unknown provider"):
         build_model(provider="not-a-real-provider")
+
+
+# --- guards the final review found untested --------------------------------
+
+
+def test_the_candidate_list_is_capped() -> None:
+    # MAX_CANDIDATES is the module's defence against an unbounded prompt: a
+    # pathological document could otherwise send thousands of candidate lines
+    # to the model. Raising the cap survived the whole suite -- and made it
+    # 7x slower, which is the cost this guard exists to prevent.
+    from era.edgar.boundaries import build_candidates
+
+    text = "\n".join(f"Item {n}. Heading" for n in range(5_000))
+
+    # A hard literal, not MAX_CANDIDATES. Asserting against the constant under
+    # test moves the goalposts with it: raising the cap to ten million would
+    # satisfy `<= MAX_CANDIDATES` and the guard would be gone with every test
+    # still green.
+    assert len(build_candidates(text)) <= 1_000
+
+
+def test_the_cache_key_changes_when_the_decision_version_changes(tmp_path: Path) -> None:
+    # _DECISION_VERSION exists so that improving the prompt invalidates cached
+    # decisions. Without it in the key, re-running a validation against a warm
+    # cache measures the OLD prompt and publishes the result as evidence the
+    # change worked -- which nearly happened once already.
+    from era.edgar import boundaries
+
+    candidates = build_candidates("Item 1. Business\nsome body text here\n")
+    selector = boundaries.CachedBoundarySelector(_CountingSelector({}), tmp_path)
+
+    first = selector._cache_path(candidates)
+    original = boundaries._DECISION_VERSION
+    try:
+        boundaries._DECISION_VERSION = original + "-next"
+        second = selector._cache_path(candidates)
+    finally:
+        boundaries._DECISION_VERSION = original
+
+    assert first != second, "a prompt-version bump must not reuse cached decisions"

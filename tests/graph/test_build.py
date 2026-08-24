@@ -188,3 +188,89 @@ def test_the_note_carries_the_authoritative_accession_set() -> None:
     note = _run(ScriptedModel({"claims": [_claim(SUPPORTED)]}), _store())["note"]
 
     assert ACC in note.accessions
+
+
+# --- retry mechanics the final review found unpinned -----------------------
+
+
+def test_a_retry_replaces_the_section_it_retried() -> None:
+    # `_latest_by_section` keeping the FIRST section instead of the last
+    # survived the whole suite. Retries would still run and still cost money,
+    # and their output would be silently thrown away -- the entire retry
+    # feature rests on that one line.
+    store = _store()
+
+    class _ImprovingModel(ScriptedModel):
+        """Fails first, then succeeds -- so a kept retry is visible."""
+
+        def with_structured_output(self, schema: Any, **_: Any) -> Any:
+            outer = self
+
+            class _Runnable:
+                def invoke(self, prompt: Any, config: Any = None) -> Any:
+                    outer.calls += 1
+                    bad = "The company closed 4,200 stores."
+                    text = SUPPORTED if "previous attempt was rejected" in str(prompt) else bad
+                    return schema(claims=[_claim(text)])
+
+            return _Runnable()
+
+    result = _run(_ImprovingModel({}), store, max_retries=2)
+    note = result["note"]
+
+    # The corrected text is what survived, not the first rejected attempt.
+    assert note.coverage.sections_available == len(SectionName)
+    assert result["complaints"] == {}
+    assert all(SUPPORTED in claim.text for s in note.sections for claim in s.claims)
+
+
+def test_the_retry_budget_is_actually_spent_before_giving_up() -> None:
+    # The existing bound test asserts only the ceiling, so halving the budget
+    # (`<=` to `<`) survived. "Rewritten at most twice" needs a floor too.
+    model = ScriptedModel({"claims": [_claim("The company closed 4,200 stores.")]})
+
+    result = _run(model, _store(), max_retries=2)
+
+    assert max(result["attempts"].values()) == 3  # first attempt plus exactly two retries
+
+
+def test_an_infrastructure_failure_does_not_drive_retries() -> None:
+    # Regenerating a section because the store blinked spends the budget on a
+    # complaint no model can act on. The category split exists for this.
+    class _ErroringStore(InMemoryChunkStore):
+        def get(self, accession: str, chunk_id: int) -> Any:
+            raise RuntimeError("simulated store outage")
+
+    store = _ErroringStore()
+    chunks = [
+        Chunk(chunk_id=i, accession=ACC, item=item, start=0, text=SUPPORTED)
+        for i, item in enumerate(["1", "1A", "7"])
+    ]
+    store.upsert(chunks, FakeEmbedder().embed([c.text for c in chunks]))
+
+    model = ScriptedModel({"claims": [_claim(SUPPORTED)]})
+    result = _run(model, store, max_retries=2)
+
+    # Every section was attempted exactly once: no retry was spent on an
+    # outage, even though verification could not complete.
+    assert set(result["attempts"].values()) == {1}
+    assert result["complaints"] == {}
+
+
+def test_a_citation_to_another_companys_filing_is_caught_end_to_end() -> None:
+    # Cross-company scoping had no graph-level coverage at all: the runtime
+    # verify node could be called with accessions=None and nothing noticed.
+    store = InMemoryChunkStore()
+    foreign = Chunk(
+        chunk_id=0, accession="9999999999-24-000001", item="1A", start=0, text=SUPPORTED
+    )
+    store.upsert([foreign], FakeEmbedder().embed([foreign.text]))
+
+    model = ScriptedModel({"claims": [_claim(SUPPORTED)]})
+    result = _run(model, store, max_retries=0)
+
+    # Retrieval is scoped to this note's filing, so the other company's passage
+    # is never even offered -- and nothing citing it can reach the note.
+    note = result["note"]
+    assert note.coverage.sections_available == 0
+    assert all(acc != "9999999999-24-000001" for acc in note.accessions)

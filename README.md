@@ -210,7 +210,7 @@ against.
 ## Development
 
 ```bash
-uv run pytest          # 279 tests, offline, no API keys required
+uv run pytest          # 291 tests, offline, no API keys required
 uv run ruff check .
 uv run mypy src
 ```
