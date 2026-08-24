@@ -26,6 +26,7 @@ from era.edgar.client import EdgarClient
 from era.graph.models import CHEAP_MODEL, build_model
 from era.index.embeddings import VoyageEmbedder
 from era.index.ingest import IngestResult, ingest_ticker
+from era.index.notes import PgNoteStore
 from era.index.store import PgVectorStore
 
 app = typer.Typer(help="Cited equity research from SEC filings.")
@@ -137,7 +138,14 @@ def ingest(ticker: str) -> None:
 
 
 @app.command()
-def research(ticker: str) -> None:
+def research(
+    ticker: str,
+    save: bool = typer.Option(
+        False,
+        "--save",
+        help="Store the note so the deployed site can serve it.",
+    ),
+) -> None:
     """Write a cited research note for an already-indexed company.
 
     Reads only what `era ingest` has already stored. Nothing here fetches or
@@ -196,7 +204,19 @@ def research(ticker: str) -> None:
         cost_usd=record.cost_usd,
         latency_seconds=record.latency_seconds,
     )
-    typer.echo(render_markdown(note))
+    markdown = render_markdown(note)
+    typer.echo(markdown)
+
+    if save:
+        # Deliberate, never automatic. The deployed site serves what is stored,
+        # so storing is publishing -- and publishing a note whose sections all
+        # failed would put an empty document in front of a reader.
+        if note.coverage.sections_available == 0:
+            typer.echo("not saved: no section was available", err=True)
+        else:
+            with PgNoteStore(dsn=settings.database_url) as notes:
+                notes.save(note, markdown)
+            typer.echo(f"saved {note.ticker}", err=True)
 
     if note.coverage.sections_available == 0:
         # Every section failed. The note still renders and says so, but this is
