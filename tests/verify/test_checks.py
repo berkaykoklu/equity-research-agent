@@ -1229,3 +1229,105 @@ def test_violations_carry_their_section_and_claim_index() -> None:
     assert [v.kind for v in violations] == ["recommendation_language"]
     assert violations[0].section == SectionName.RISK_FACTORS
     assert violations[0].claim_index == 1
+
+
+# --- scale-blindness regression (the 1000x hole) ---------------------------
+#
+# The verifier once expanded an XBRL fact downward across scales and matched
+# any claim candidate against any reference candidate. A claim with the right
+# mantissa and the wrong magnitude word therefore passed: "Revenue was 391
+# million USD" was accepted against a true $391,035,000,000, because the
+# expansion produced 391,035,000 and the mantissa agreed inside tolerance.
+# That is a 1000x error through the guarantee the module exists to provide.
+
+
+def _revenue_claim(text: str) -> Section:
+    return Section(
+        name=SectionName.FINANCIAL_HEALTH,
+        claims=(
+            Claim(
+                text=text,
+                facts=(
+                    FactRef(
+                        tag="Revenues",
+                        fiscal_period="FY2024",
+                        value=391_035_000_000.0,
+                        accession="acc",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def test_a_claim_naming_the_wrong_magnitude_is_rejected() -> None:
+    store = _store_with("Revenue is discussed below.")
+
+    for wrong in ("Revenue was 391 million USD.", "Revenue was 391 thousand USD."):
+        violations = verify_section(_revenue_claim(wrong), store, FACTS, accessions=ACC)
+        assert [v.kind for v in violations] == ["unsupported_figure"], wrong
+
+
+def test_a_claim_naming_the_right_magnitude_is_accepted() -> None:
+    store = _store_with("Revenue is discussed below.")
+
+    assert (
+        verify_section(_revenue_claim("Revenue was 391 billion USD."), store, FACTS, accessions=ACC)
+        == []
+    )
+
+
+def test_a_figure_quoted_at_the_filings_presented_scale_is_accepted() -> None:
+    # Filings state revenue in millions; XBRL states it in dollars. Both
+    # spellings name the same figure and both must pass.
+    store = _store_with("Revenue is discussed below.")
+
+    for correct in ("Revenue was 391,035 million USD.", "Revenue was 391,035,000,000 USD."):
+        assert verify_section(_revenue_claim(correct), store, FACTS, accessions=ACC) == [], correct
+
+
+def test_a_scale_word_cannot_be_bolted_onto_a_chunks_bare_number() -> None:
+    # The chunk says 4,200. A claim may restate 4,200, but not reinterpret it
+    # as 4,200 million -- the source never asserted that magnitude.
+    store = _store_with("The company closed 4,200 stores during the year.")
+
+    def closed(text: str) -> Section:
+        return Section(
+            name=SectionName.BUSINESS_OVERVIEW,
+            claims=(Claim(text=text, chunks=(ChunkRef(accession="acc", chunk_id=0),)),),
+        )
+
+    assert (
+        verify_section(closed("The company closed 4,200 stores."), store, FACTS, accessions=ACC)
+        == []
+    )
+    for inflated in ("The company closed 4,200 million stores.", "4,200 billion stores closed."):
+        violations = verify_section(closed(inflated), store, FACTS, accessions=ACC)
+        assert [v.kind for v in violations] == ["unsupported_figure"], inflated
+
+
+# --- no-advice false positives on ordinary filing prose --------------------
+#
+# An earlier pattern matched the bare noun "rate", which appears constantly in
+# the financial-health section this agent writes every run. False positives
+# there burn the retry budget continuously and block the Tier 1 merge gate.
+
+
+def test_ordinary_financial_prose_is_not_treated_as_advice() -> None:
+    for ordinary in (
+        "Our effective tax rate benefited from cash we hold overseas.",
+        "The interest rate on the notes we hold is fixed until 2030.",
+        "Foreign exchange rate exposure relates to assets we will sell.",
+        "The board will hold a vote and shareholders may sell shares.",
+    ):
+        assert no_recommendation_language(ordinary) == [], ordinary
+
+
+def test_actual_recommendations_are_still_caught() -> None:
+    for advice in (
+        "We rate the shares a Buy.",
+        "The stock is rated a Buy.",
+        "Investors should buy the shares.",
+        "Our price target is 250 USD.",
+    ):
+        assert no_recommendation_language(advice), advice

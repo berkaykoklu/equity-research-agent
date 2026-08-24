@@ -83,7 +83,20 @@ NUMBER_WITH_SCALE = re.compile(
 # they stay bare-matched.
 _RATING_VERBS = r"(?:buy|sell|hold|outperform|underperform|overweight|underweight)"
 RECOMMENDATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("rated", re.compile(rf"\brated?\b[^.\n]{{0,40}}\b{_RATING_VERBS}\b", re.IGNORECASE)),
+    # `rated`, never `rate`. An earlier version used `rated?`, which matched
+    # the bare noun and made this check fire on the core vocabulary of the
+    # financial-health section -- "our effective tax rate benefited from cash
+    # we hold overseas" and "the interest rate on the notes we hold" both
+    # tripped it. Those sentences are generated every run, so the false
+    # positives would have burned the retry budget continuously and blocked
+    # the Tier 1 merge gate for no reason.
+    ("rated", re.compile(rf"\brated\b[^.\n]{{0,40}}\b{_RATING_VERBS}\b", re.IGNORECASE)),
+    # The present-tense form needs an explicit analyst subject to distinguish
+    # "we rate the shares a Buy" from any sentence containing the noun.
+    (
+        "we rate",
+        re.compile(rf"\b(?:we|analysts?)\s+rate\b[^.\n]{{0,40}}\b{_RATING_VERBS}\b", re.IGNORECASE),
+    ),
     ("should buy/sell/hold", re.compile(rf"\bshould\s+{_RATING_VERBS}\b", re.IGNORECASE)),
     ("we recommend", re.compile(r"\bwe\s+recommend\b", re.IGNORECASE)),
     ("price target", re.compile(r"\bprice\s+target\b", re.IGNORECASE)),
@@ -118,6 +131,17 @@ class _Figure:
     detail: str
     candidates: frozenset[float]
     material: bool
+    # The single value this figure asserts at face value: "391 billion" means
+    # 3.91e11 and nothing else, and a bare "4,200" asserts 4200 even though a
+    # millions-denominated table might rescale it.
+    exact: float
+    # True when the writer supplied the scale word. A scale-explicit figure is
+    # unambiguous, so it must be matched only against what a source actually
+    # asserts -- never against a source's rescaled interpretations. Without
+    # this distinction, "Revenue was 391 million USD" passed against a
+    # $391bn fact, because the reference had been expanded down to 391,035,000
+    # and the mantissa matched. A 1000x error through the numeric guarantee.
+    scale_explicit: bool
 
 
 def _display(literal: str, word: str | None) -> str:
@@ -158,7 +182,11 @@ def _parse_figures(text: str) -> list[_Figure]:
             value = literal * MAGNITUDE_WORDS[word.lower()]
             candidates = frozenset({value})
             material = True
+            exact = value
+            scale_explicit = True
         else:
+            exact = literal
+            scale_explicit = False
             candidates = frozenset(
                 {literal, literal * 1_000, literal * 1_000_000, literal * 1_000_000_000}
             )
@@ -170,7 +198,13 @@ def _parse_figures(text: str) -> list[_Figure]:
             material = not is_year and abs(literal) >= MATERIAL_FIGURE_MIN
 
         figures.append(
-            _Figure(detail=_display(literal_str, word), candidates=candidates, material=material)
+            _Figure(
+                detail=_display(literal_str, word),
+                candidates=candidates,
+                material=material,
+                exact=exact,
+                scale_explicit=scale_explicit,
+            )
         )
     return figures
 
@@ -181,22 +215,25 @@ def _isclose(a: float, b: float) -> bool:
     return math.isclose(a, b, rel_tol=RELATIVE_TOLERANCE, abs_tol=1e-6)
 
 
-def _fact_candidates(value: float) -> frozenset[float]:
-    """The dollar-values a filing might spell this fact out as in prose.
+def _fact_value(value: float) -> frozenset[float]:
+    """What this fact asserts, as a set so callers can union it into a pool.
 
-    abs(value), not value: the digit regex never captures a leading minus
-    sign (prose writes "a net loss of $5 billion", not "-$5 billion"), so a
-    negative XBRL fact -- routine for net_income, operating_income, and
-    operating_cash_flow on a loss-making filer -- must still generate
-    positive candidates, or every correct citation of a loss figure would
-    be rejected as unsupported.
+    Exactly one value, never a rescaled family. XBRL reports an exact dollar
+    amount -- there is no ambiguity in it to model. Expanding a fact downward
+    is also what broke the numeric guarantee: against a true $391,035,000,000,
+    the expansion produced 391,035,000, which "Revenue was 391 million USD"
+    then matched inside tolerance. The prose side already walks the ambiguity
+    in the direction it actually exists (a bare "391,035" in a millions table),
+    so expanding here was both wrong and redundant.
+
+    abs(value), not value: the digit regex never captures a leading minus sign
+    (prose writes "a net loss of $5 billion", not "-$5 billion"), so a negative
+    XBRL fact -- routine for net_income, operating_income and operating_cash_flow
+    on a loss-making filer -- must still match a correct citation.
     """
     if not math.isfinite(value):
         return frozenset()
-    magnitude = abs(value)
-    return frozenset(
-        {magnitude, magnitude / 1_000, magnitude / 1_000_000, magnitude / 1_000_000_000}
-    )
+    return frozenset({abs(value)})
 
 
 def no_recommendation_language(text: str) -> list[Violation]:
@@ -307,7 +344,7 @@ def _verify_facts(
                     )
                 )
             else:
-                supported_pool |= _fact_candidates(exact.value)
+                supported_pool |= _fact_value(exact.value)
         except Exception as exc:  # noqa: BLE001 -- malformed fact data must not abort the claim
             violations.append(
                 Violation(
@@ -341,16 +378,31 @@ def _verify_claim(
     # cited chunk.
     claimed_figures = [figure for figure in _parse_figures(claim.text) if figure.material]
     if claimed_figures:
-        pool = set(supported_pool)
+        # Two pools, because scale ambiguity is not symmetric.
+        #
+        # `asserted` is what the sources literally say: an XBRL fact's exact
+        # dollar amount, and each prose figure's face value.
+        # `rescaled` additionally holds the readings a *bare* source number
+        # could carry -- "391,035" inside a millions-denominated table really
+        # does mean $391bn, and that ambiguity is real.
+        #
+        # A claim that names its own scale ("391 million") is unambiguous, so
+        # it is checked against `asserted` only. Letting it reach `rescaled`
+        # is what allowed a 1000x error to pass: every mantissa-correct claim
+        # matched some rescaling of the source, whatever magnitude it named.
+        asserted = set(supported_pool)
+        rescaled = set(supported_pool)
         for text in supporting_text:
             for figure in _parse_figures(text):
-                pool |= figure.candidates
+                asserted.add(figure.exact)
+                rescaled |= figure.candidates
 
         seen: set[str] = set()
         for figure in claimed_figures:
             if figure.detail in seen:
                 continue
             seen.add(figure.detail)
+            pool = asserted if figure.scale_explicit else rescaled
             if not any(
                 _isclose(claimed, supported) for claimed in figure.candidates for supported in pool
             ):
