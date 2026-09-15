@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/berkaykoklu/equity-research-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/berkaykoklu/equity-research-agent/actions/workflows/ci.yml)
 
-**[Live site →](https://equity-research-agent-one.vercel.app)** — real notes for
+**[Live site →](https://equity.berkaykoklu.com)** — real notes for
 Apple, Coca-Cola and Johnson & Johnson. Click any citation to land on the SEC
 filing it came from.
 

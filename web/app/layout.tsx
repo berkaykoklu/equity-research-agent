@@ -6,7 +6,7 @@ const DESCRIPTION =
   "Research notes in which every sentence is traceable to the filing passage it came from, and every figure is read from the company's own filed data rather than written by a model. The checker is ordinary code, not a model judging a model.";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://equity-research-agent-one.vercel.app"),
+  metadataBase: new URL("https://equity.berkaykoklu.com"),
   title: "Research notes that cannot cite what does not exist",
   description: DESCRIPTION,
   openGraph: { title: "Research notes that cannot cite what does not exist", description: DESCRIPTION, type: "website", locale: "en" },

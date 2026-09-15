@@ -4,7 +4,7 @@ import { listNotes } from "@/lib/api";
 export const dynamic = "force-dynamic";
 
 const REPO = "https://github.com/berkaykoklu/equity-research-agent";
-const HOME = "https://berkaykoklu.vercel.app";
+const HOME = "https://berkaykoklu.com";
 
 function generatedOn(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -16,7 +16,7 @@ export default async function Home() {
   return (
     <main className="relative z-10 mx-auto w-full max-w-[64rem] px-6 py-16 sm:py-24">
       <a href={HOME} className="font-mono text-[0.76rem] text-low transition-colors hover:text-mid">
-        ← berkaykoklu.vercel.app
+        ← berkaykoklu.com
       </a>
 
       <h1 className="display mt-6 text-[clamp(2.2rem,6vw,3.8rem)]">
