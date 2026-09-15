@@ -1,204 +1,130 @@
-:root {
-  --bg: #fbfaf8;
-  --panel: #ffffff;
-  --border: #e2ded7;
-  --text: #1b1a18;
-  --muted: #6a655d;
-  --accent: #7a4b1e;
-  --accent-soft: #f2ece3;
-  --warn-bg: #fdf6ec;
-  --warn-border: #e7d5b8;
-  --warn-text: #7a5b23;
+@import "tailwindcss";
+
+/* The surface is built from four near-black steps rather than one flat ground,
+   because depth is what separates a product from a styled document. Exactly
+   one hue carries meaning: it marks what is interactive or what is a result. */
+@theme {
+  --color-base: #08090a;
+  --color-panel: #0d0f12;
+  --color-raised: #13161b;
+  --color-lifted: #1a1e24;
+
+  --color-line: #1f242b;
+  --color-line-lit: #2e343d;
+  --color-line-ctl: #3f4752;
+
+  --color-hi: #f4f5f7;
+  --color-mid: #9aa2ae;
+  --color-low: #79818e;
+
+  --color-brand: #6d8cff;
+  --color-brand-lit: #8aa3ff;
+  --color-brand-deep: #2b3a6b;
+
+  /* Two accents, both semantic. Blue is structure and interaction; cyan marks
+     a system in motion -- data actually moving through a pipeline. Green and
+     amber appear only as states: passed, blocked. Nothing here is decorative. */
+  --color-flow: #4dd8e8;
+  --color-ok: #4ade80;
+  --color-block: #f0a58c;
+  --color-flag: #f0a58c;
+
+  /* Each section gets an identity so the page reads as chapters rather than
+     one long scroll. These are hues, not decoration: a reader recognises where
+     they are before reading the heading. */
+  --color-sec-build: #6d8cff;
+  --color-sec-work: #4dd8e8;
+  --color-sec-open: #4ade80;
+  --color-sec-research: #c9a3ff;
+  --color-sec-exp: #ffb266;
+
+  --font-sans: Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+
+  --radius-panel: 12px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14130f;
-    --panel: #1b1a16;
-    --border: #302d27;
-    --text: #ece8e0;
-    --muted: #9b958a;
-    --accent: #d9a15f;
-    --accent-soft: #262119;
-    --warn-bg: #221c12;
-    --warn-border: #453721;
-    --warn-text: #d2b481;
+@layer base {
+  html { color-scheme: dark; scroll-behavior: smooth; }
+
+  body {
+    background: var(--color-base);
+    color: var(--color-hi);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* One light source, behind the first screen only. Below the fold the page
+     sits on flat ground -- a gradient that follows you down the page is
+     decoration, and decoration is what makes a site read as a template. */
+  /* Sits over the drifting field, so the page has a horizon rather than an
+     evenly-lit backdrop. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background:
+      radial-gradient(62% 48% at 18% -8%, rgba(109, 140, 255, 0.16), transparent 68%),
+      radial-gradient(45% 40% at 92% 2%, rgba(77, 216, 232, 0.08), transparent 68%),
+      linear-gradient(to bottom, transparent 0%, rgba(8, 9, 10, 0.55) 46%, rgba(8, 9, 10, 0.86) 100%);
+  }
+
+  ::selection { background: rgba(109, 140, 255, 0.28); }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
   }
 }
 
-* {
-  box-sizing: border-box;
-}
+@layer utilities {
+  /* Numerals that line up in columns and never jitter while animating. */
+  .tnum { font-variant-numeric: tabular-nums; }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: ui-serif, Georgia, "Times New Roman", serif;
-  font-size: 17px;
-  line-height: 1.65;
-  -webkit-font-smoothing: antialiased;
-}
+  /* Display type: the size and the tightening are the display treatment, so a
+     third typeface never has to be loaded to get one. */
+  .display {
+    font-weight: 600;
+    letter-spacing: -0.05em;
+    line-height: 0.92;
+  }
 
-main {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 3rem 1.25rem 5rem;
-}
+  /* A surface that sits above the field instead of on it: the ring is what
+     separates a panel from the drifting graph behind it. */
+  .lift {
+    background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+    backdrop-filter: blur(14px);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--color-line-lit) 70%, transparent),
+      0 18px 48px -24px rgba(0, 0, 0, 0.9);
+  }
 
-a {
-  color: var(--accent);
-  text-underline-offset: 2px;
-}
+  .glow-ring {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--sec, var(--color-brand)) 32%, transparent),
+      0 0 44px -18px color-mix(in srgb, var(--sec, var(--color-brand)) 60%, transparent);
+  }
 
-h1 {
-  font-size: 1.9rem;
-  line-height: 1.2;
-  margin: 0 0 0.4rem;
-  letter-spacing: -0.01em;
-}
+  .label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    color: var(--color-low);
+  }
 
-h2 {
-  font-size: 1.25rem;
-  margin: 2.5rem 0 0.75rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.lede {
-  color: var(--muted);
-  margin: 0 0 2rem;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  font-size: 0.82em;
-}
-
-/* --- index list --- */
-
-.companies {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  border-top: 1px solid var(--border);
-}
-
-.companies li {
-  border-bottom: 1px solid var(--border);
-}
-
-.companies a {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.75rem;
-  padding: 0.9rem 0.25rem;
-  text-decoration: none;
-  color: inherit;
-}
-
-.companies a:hover {
-  background: var(--accent-soft);
-}
-
-.ticker {
-  font-weight: 700;
-  font-size: 1.1rem;
-  letter-spacing: 0.02em;
-  color: var(--accent);
-}
-
-.meta {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin-left: auto;
-  text-align: right;
-}
-
-/* --- a note --- */
-
-.claim {
-  margin: 0 0 1.4rem;
-}
-
-.cites {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-top: 0.35rem;
-}
-
-.cite {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  font-size: 0.72rem;
-  line-height: 1.4;
-  padding: 0.15rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--panel);
-  color: var(--muted);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.cite:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.unavailable {
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  color: var(--warn-text);
-  border-radius: 4px;
-  padding: 0.7rem 0.9rem;
-  font-size: 0.9rem;
-}
-
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 1.1rem 1.25rem;
-  margin: 2.5rem 0 0;
-  font-size: 0.92rem;
-}
-
-.panel h3 {
-  margin: 0 0 0.6rem;
-  font-size: 0.95rem;
-}
-
-.panel ul {
-  margin: 0;
-  padding-left: 1.1rem;
-}
-
-.panel li {
-  margin-bottom: 0.4rem;
-}
-
-.disclaimer {
-  margin-top: 2.5rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-style: italic;
-}
-
-.back {
-  display: inline-block;
-  margin-bottom: 1.5rem;
-  font-size: 0.85rem;
-  text-decoration: none;
-}
-
-.error {
-  border: 1px solid var(--warn-border);
-  background: var(--warn-bg);
-  color: var(--warn-text);
-  padding: 1rem 1.15rem;
-  border-radius: 6px;
+    .diagram-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+  .diagram-scroll::-webkit-scrollbar { height: 4px; }
+  .diagram-scroll::-webkit-scrollbar-thumb { background: var(--color-line-lit); border-radius: 2px; }
 }
